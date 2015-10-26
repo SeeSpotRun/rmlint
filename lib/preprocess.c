@@ -87,6 +87,14 @@ gint rm_file_cmp(const RmFile *file_a, const RmFile *file_b) {
                      : 0;
     }
 
+    if(result == 0) {
+        if (cfg->btrfs_scan) {
+            result = SIGN_DIFF(
+                     rm_mounts_get_volume(file_a->session->mounts, file_a->dev),
+                     rm_mounts_get_volume(file_a->session->mounts, file_b->dev) );
+        }
+    }
+
     return result;
 }
 

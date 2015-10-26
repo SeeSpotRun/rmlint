@@ -331,10 +331,17 @@ dev_t rm_mounts_get_disk_id_by_path(RmMountTable *self, const char *path);
 bool rm_mounts_is_evil(RmMountTable *self, dev_t to_check);
 
 /**
+ * @brief Get the volume behind a btrfs subvolume.
+ */
+dev_t rm_mounts_get_volume(RmMountTable *self, dev_t dev);
+
+/**
  * @brief Indicates true if source and dest are on same partition, and the
  * partition supports reflink copies (cp --reflink).
  */
 bool rm_mounts_can_reflink(RmMountTable *self, dev_t source, dev_t dest);
+
+gboolean rm_mounts_is_btrfs(RmMountTable *self, dev_t dev, char *path);
 
 /////////////////////////////////
 //    FIEMAP IMPLEMENATION     //

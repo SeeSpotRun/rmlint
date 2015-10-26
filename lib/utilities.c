@@ -503,15 +503,17 @@ typedef struct RmPartitionInfo {
     char *name;
     char *fsname;
     dev_t disk;
+    dev_t dev;
 } RmPartitionInfo;
 
 #if RM_MOUNTTABLE_IS_USABLE
 
-RmPartitionInfo *rm_part_info_new(char *name, char *fsname, dev_t disk) {
+RmPartitionInfo *rm_part_info_new(char *name, char *fsname, dev_t disk, dev_t dev) {
     RmPartitionInfo *self = g_new0(RmPartitionInfo, 1);
     self->name = g_strdup(name);
     self->fsname = g_strdup(fsname);
     self->disk = disk;
+    self->dev = dev;
     return self;
 }
 
@@ -808,7 +810,7 @@ static bool rm_mounts_create_tables(RmMountTable *self, bool force_fiemap) {
             }
             g_hash_table_insert(self->part_table,
                                 GUINT_TO_POINTER(stat_buf_folder.st_dev),
-                                rm_part_info_new(entry->dir, entry->fsname, whole_disk));
+                                rm_part_info_new(entry->dir, entry->fsname, whole_disk, stat_buf_folder.st_dev));
         } else {
             rm_log_debug_line("Skipping duplicate mount entry for dir %s dev %02u:%02u",
                               entry->dir, major(stat_buf_folder.st_dev),
@@ -820,7 +822,7 @@ static bool rm_mounts_create_tables(RmMountTable *self, bool force_fiemap) {
         if(!g_hash_table_contains(self->part_table, GINT_TO_POINTER(whole_disk))) {
             g_hash_table_insert(self->part_table,
                                 GUINT_TO_POINTER(whole_disk),
-                                rm_part_info_new(entry->dir, entry->fsname, whole_disk));
+                                rm_part_info_new(entry->dir, entry->fsname, whole_disk, whole_disk));
         }
 
         if(!g_hash_table_contains(self->disk_table, GINT_TO_POINTER(whole_disk))) {
@@ -927,7 +929,7 @@ dev_t rm_mounts_get_disk_id(RmMountTable *self, dev_t dev, const char *path) {
                                       " - looks like subvolume %s on volume " GREEN
                                       "%s" RESET,
                                       path, prev, parent_part->name);
-                    part = rm_part_info_new(prev, parent_part->fsname, parent_part->disk);
+                    part = rm_part_info_new(prev, parent_part->fsname, parent_part->disk, dev);
                     g_hash_table_insert(self->part_table, GINT_TO_POINTER(dev),
                                         part);
                     /* if parent_part is in the reflinkfs_table, add dev as well */
@@ -977,23 +979,26 @@ bool rm_mounts_is_evil(RmMountTable *self, dev_t to_check) {
     return g_hash_table_contains(self->evilfs_table, GUINT_TO_POINTER(to_check));
 }
 
+dev_t rm_mounts_get_volume(RmMountTable *self, dev_t dev) {
+    RmPartitionInfo *part =
+            g_hash_table_lookup(self->part_table, GINT_TO_POINTER(dev));
+    return part ?  part->dev : 0;
+}
+
+gboolean rm_mounts_is_btrfs(RmMountTable *self, dev_t dev, char *path) {
+    rm_mounts_get_disk_id(self, dev, path);
+    char *part_type =
+            g_hash_table_lookup(self->reflinkfs_table, GINT_TO_POINTER(dev));
+    return (part_type && strcmp(part_type, "btrfs") == 0);
+}
+
 bool rm_mounts_can_reflink(RmMountTable *self, dev_t source, dev_t dest) {
     rm_assert_gentle(self);
-    if(g_hash_table_contains(self->reflinkfs_table, GUINT_TO_POINTER(source))) {
-        if(source == dest) {
-            return true;
-        } else {
-            RmPartitionInfo *source_part =
-                g_hash_table_lookup(self->part_table, GINT_TO_POINTER(source));
-            RmPartitionInfo *dest_part =
-                g_hash_table_lookup(self->part_table, GINT_TO_POINTER(dest));
-            rm_assert_gentle(source_part);
-            rm_assert_gentle(dest_part);
-            return (strcmp(source_part->fsname, dest_part->fsname) == 0);
-        }
-    } else {
-        return false;
-    }
+    dev_t source_vol = rm_mounts_get_volume(self, source);
+    dev_t dest_vol = rm_mounts_get_volume(self, dest);
+
+    return (source_vol == dest_vol && source_vol > 0);
+
 }
 
 /////////////////////////////////

@@ -70,6 +70,7 @@ typedef struct RmCfg {
     gboolean fake_fiemap;
     gboolean progress_enabled;
     gboolean list_mounts;
+    gboolean btrfs_scan;
 
     int permissions;
 

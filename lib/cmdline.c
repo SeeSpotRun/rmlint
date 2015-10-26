@@ -1009,6 +1009,19 @@ static gboolean rm_cmd_parse_progress(_U const char *option_name, _U const gchar
     return true;
 }
 
+static gboolean rm_cmd_parse_btrfs_scan(_U const char *option_name, _U const gchar *value,
+                                        RmSession *session, _U GError **error) {
+    rm_fmt_clear(session->formats);
+    rm_fmt_add(session->formats, "progressbar", "stdout");
+    rm_fmt_add(session->formats, "summary", "stdout");
+    rm_fmt_add(session->formats, "sh", "rmlint.sh");
+    rm_cmd_parse_config_pair(session, "sh:handler=clone", NULL);
+    rm_cmd_parse_lint_types("", "df", session, NULL);
+    session->cfg->btrfs_scan = TRUE;
+
+    return true;
+}
+
 static void rm_cmd_set_default_outputs(RmSession *session) {
     rm_fmt_add(session->formats, "pretty", "stdout");
     rm_fmt_add(session->formats, "summary", "stdout");
@@ -1339,9 +1352,10 @@ bool rm_cmd_parse_args(int argc, char **argv, RmSession *session) {
         {"cache"            , 'C' , 0        , G_OPTION_ARG_CALLBACK , FUNC(cache)          , _("Add json cache file")                  , "PATH"}                ,
 
         /* Non-trvial switches */
-        {"progress" , 'g' , EMPTY , G_OPTION_ARG_CALLBACK , FUNC(progress) , _("Enable progressbar")                   , NULL} ,
-        {"loud"     , 'v' , EMPTY , G_OPTION_ARG_CALLBACK , FUNC(loud)     , _("Be more verbose (-vvv for much more)") , NULL} ,
-        {"quiet"    , 'V' , EMPTY , G_OPTION_ARG_CALLBACK , FUNC(quiet)    , _("Be less verbose (-VVV for much less)") , NULL} ,
+        {"progress" , 'g' , EMPTY , G_OPTION_ARG_CALLBACK , FUNC(progress)   , _("Enable progressbar")                   , NULL} ,
+        {"btrfs-scan", 0  , EMPTY , G_OPTION_ARG_CALLBACK , FUNC(btrfs_scan) , _("Enable btrfs scan settings")           , NULL} ,
+        {"loud"     , 'v' , EMPTY , G_OPTION_ARG_CALLBACK , FUNC(loud)       , _("Be more verbose (-vvv for much more)") , NULL} ,
+        {"quiet"    , 'V' , EMPTY , G_OPTION_ARG_CALLBACK , FUNC(quiet)      , _("Be less verbose (-VVV for much less)") , NULL} ,
 
         /* Trivial boolean options */
         {"no-with-color"            , 'W'  , DISABLE   , G_OPTION_ARG_NONE      , &cfg->with_color               , _("Be not that colorful")                                , NULL}      ,

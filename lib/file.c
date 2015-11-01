@@ -165,3 +165,20 @@ gint rm_file_basenames_cmp(const RmFile *file_a, const RmFile *file_b) {
 
     return g_ascii_strcasecmp(file_a_basename, file_b_basename);
 }
+
+void rm_file_bundle(RmFile *link, RmFile *head) {
+    head->hardlinks.is_head = TRUE;
+
+    if(!head->hardlinks.files) {
+        head->hardlinks.files = g_queue_new();
+    }
+    g_queue_push_tail(head->hardlinks.files, link);
+    link->hardlinks.hardlink_head = head;
+
+    if (link->hardlinks.is_head) {
+        g_queue_foreach(link->hardlinks.files, (GFunc)rm_file_bundle, head);
+        g_queue_free(link->hardlinks.files);
+        link->hardlinks.files = NULL;
+    }
+}
+

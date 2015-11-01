@@ -169,6 +169,7 @@ typedef struct RmFile {
         bool has_prefd : 1;
         bool has_non_prefd : 1;
         bool is_head : 1;
+        bool is_reflink : 1;
         union {
             GQueue *files;
             struct RmFile *hardlink_head;
@@ -298,5 +299,10 @@ void rm_file_build_path(RmFile *file, char *buf);
  * @retval true if basenames match.
  */
 gint rm_file_basenames_cmp(const RmFile *file_a, const RmFile *file_b);
+
+/**
+ * @brief Bundle hardlink or reflink file into head file
+ */
+ void rm_file_bundle(RmFile *link, RmFile *head);
 
 #endif /* end of include guard */

@@ -584,7 +584,7 @@ static void rm_tm_insert_dir(RmTreeMerger *self, RmDirectory *directory) {
     }
 
     GQueue *dir_queue =
-        rm_hash_table_setdefault(self->result_table, directory, (RmNewFunc)g_queue_new);
+        rm_hash_table_setdefault(self->result_table, directory, (RmNewFunc)g_queue_new, NULL);
     g_queue_push_head(dir_queue, directory);
     directory->was_inserted = true;
 }
@@ -724,7 +724,7 @@ static void rm_tm_forward_unresolved(RmTreeMerger *self, RmDirectory *directory)
         RmFile *file = iter->data;
 
         GQueue *file_list = rm_hash_table_setdefault(self->file_groups, file->digest,
-                                                     (RmNewFunc)g_queue_new);
+                                                     (RmNewFunc)g_queue_new, NULL);
         g_queue_push_head(file_list, file);
     }
 

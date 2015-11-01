@@ -173,11 +173,13 @@ static void rm_traverse_file(RmTravSession *trav_session, RmStat *statp,
         }
     }
 
-    if (cfg->btrfs_scan && file_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-        if (!rm_mounts_is_btrfs(session->mounts, statp->st_dev, path)) {
+    /* this will also populate session->mounts with any unmounted dev's (subvolumes) */
+    
+    if (file_type == RM_LINT_TYPE_DUPE_CANDIDATE &&
+            !rm_mounts_is_btrfs(session->mounts, statp->st_dev, path) &&
+            cfg->btrfs_scan) {
             trav_session->session->ignored_files++;
             return;
-        }
     }
 
     RmFile *file = rm_file_new(session, path, path_len, statp, file_type, is_prefd,

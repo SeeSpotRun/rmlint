@@ -205,7 +205,7 @@ bool rm_util_path_is_hidden(const char *path);
  */
 int rm_util_path_depth(const char *path);
 
-typedef gpointer (*RmNewFunc)(void);
+typedef gpointer (*RmNewFunc)(gpointer data);
 
 /**
  * @brief A setdefault supplementary function for GHashTable.
@@ -219,7 +219,7 @@ typedef gpointer (*RmNewFunc)(void);
  *
  * @return value, which may be default_func() if key does not exist.
  */
-GQueue *rm_hash_table_setdefault(GHashTable *table, gpointer key, RmNewFunc default_func);
+gpointer rm_hash_table_setdefault(GHashTable *table, gpointer key, RmNewFunc default_func, gpointer default_value);
 
 /**
  * @brief Push all elements in `src` at the tail of `dst`
@@ -230,14 +230,14 @@ GQueue *rm_hash_table_setdefault(GHashTable *table, gpointer key, RmNewFunc defa
 void rm_util_queue_push_tail_queue(GQueue *dest, GQueue *src);
 
 /**
- * @brief Function prototype for remove-iterating over a GQueue.
+ * @brief Function prototype for remove-iterating over a G[SList|List|Queue].
  *
  * @param data current element
  * @param user_data optional user_data
  *
  * @return True if the element should be removed.
  */
-typedef gboolean (*RmQRFunc)(gpointer data, gpointer user_data);
+typedef gboolean (*RmRFunc)(gpointer data, gpointer user_data);
 
 /**
  * @brief Iterate over a GQueue and call `func` on each element.
@@ -250,7 +250,20 @@ typedef gboolean (*RmQRFunc)(gpointer data, gpointer user_data);
  *
  * @return Number of removed items.
  */
-gint rm_util_queue_foreach_remove(GQueue *queue, RmQRFunc func, gpointer user_data);
+gint rm_util_queue_foreach_remove(GQueue *queue, RmRFunc func, gpointer user_data);
+
+/**
+ * @brief Iterate over a GSList and call `func` on each element.
+ *
+ * If func returns true, the element is removed from the GSList.
+ *
+ * @param list pointer to GSList to iterate
+ * @param func Function that evaluates the removal of the item
+ * @param user_data optional user data
+ *
+ * @return Number of removed items.
+ */
+gint rm_util_slist_foreach_remove(GSList **list, RmRFunc func, gpointer user_data);
 
 /**
  * @brief Return a pointer to the extension part of the file or NULL if none.
@@ -342,6 +355,8 @@ dev_t rm_mounts_get_volume(RmMountTable *self, dev_t dev);
 bool rm_mounts_can_reflink(RmMountTable *self, dev_t source, dev_t dest);
 
 gboolean rm_mounts_is_btrfs(RmMountTable *self, dev_t dev, char *path);
+
+RmNode rm_trie_find_mountpoint(RmTrie *trie, RmNode *node);
 
 /////////////////////////////////
 //    FIEMAP IMPLEMENATION     //

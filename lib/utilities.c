@@ -151,11 +151,11 @@ int rm_util_path_depth(const char *path) {
     return depth;
 }
 
-GQueue *rm_hash_table_setdefault(GHashTable *table, gpointer key,
-                                 RmNewFunc default_func) {
-    gpointer value = g_hash_table_lookup(table, key);
-    if(value == NULL) {
-        value = default_func();
+gpointer rm_hash_table_setdefault(GHashTable *table, gpointer key,
+                                 RmNewFunc default_func, gpointer default_value) {
+    gpointer value = NULL;
+    if (!g_hash_table_lookup_extended(table, key, NULL, &value)) {
+        value = default_func ? default_func(default_value) : default_value;
         g_hash_table_insert(table, key, value);
     }
 
@@ -195,7 +195,7 @@ void rm_util_queue_push_tail_queue(GQueue *dest, GQueue *src) {
     src->head = src->tail = NULL;
 }
 
-gint rm_util_queue_foreach_remove(GQueue *queue, RmQRFunc func, gpointer user_data) {
+gint rm_util_queue_foreach_remove(GQueue *queue, RmRFunc func, gpointer user_data) {
     gint removed = 0;
 
     for(GList *iter = queue->head, *next = NULL; iter; iter = next) {
@@ -205,6 +205,31 @@ gint rm_util_queue_foreach_remove(GQueue *queue, RmQRFunc func, gpointer user_da
             ++removed;
         }
     }
+    return removed;
+}
+
+gint rm_util_slist_foreach_remove(GSList **list, RmRFunc func, gpointer user_data) {
+gint removed = 0;
+
+    /* prepend a dummy "handle" so that every entry can have a "previous" */
+    GSList *handle = g_slist_prepend( *list, NULL);
+
+    /* iterate over list, keeping track of previous and next entries */
+    for(GSList *prev = handle, *iter = *list, *next = NULL; iter; iter = next) {
+        next = iter->next;
+        if(func(iter->data, user_data)) {
+            /* delete iter from GSList */
+            g_slist_free1(iter);
+            prev->next = next;
+            ++removed;
+        } else {
+            prev = iter;
+        }
+    }
+
+    /* detatch dummy handle and return result */
+    *list = handle->next;
+    g_slist_free1(handle);
     return removed;
 }
 
@@ -723,9 +748,12 @@ int rm_mounts_devno_to_wholedisk(_U RmMountEntry *entry, _U dev_t rdev, _U char 
 }
 
 static bool rm_mounts_create_tables(RmMountTable *self, bool force_fiemap) {
+    /* map mountpoint (path) to partition dev_t */
+    self->mountpoint_table = g_hash
+
     /* partition dev_t to disk dev_t */
-    self->part_table = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
-                                             (GDestroyNotify)rm_part_info_free);
+    self->part_table = g_hash_table_new_full(g_string_hash, g_string_equal,
+                                             (GDestroyNotify)g_free, NULL);
 
     /* disk dev_t to boolean indication if disk is rotational */
     self->disk_table = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
@@ -1001,6 +1029,12 @@ bool rm_mounts_can_reflink(RmMountTable *self, dev_t source, dev_t dest) {
 
 }
 
+static int is_node_mountpoint(RmTrie *trie, RmNode *node, _U int level, void *user_data) {
+    
+
+RmNode rm_trie_find_mountpoint(RmTrie *trie, RmNode *node);
+    
+
 /////////////////////////////////
 //    FIEMAP IMPLEMENATION     //
 /////////////////////////////////
@@ -1037,69 +1071,60 @@ static struct fiemap *rm_offset_get_fiemap(int fd, const int n_extents,
  * the next non-contiguous extent (fragment) is encountered and writes the corresponding
  * file offset to &file_offset_next.
  * */
-RmOff rm_offset_get_from_fd(int fd, RmOff file_offset, RmOff *file_offset_next) {
+RmOff rm_offset_get_from_fd(int fd, RmOff logical, RmOff *logical_next) {
     RmOff result = 0;
-    bool done = FALSE;
 
     /* used for detecting contiguous extents */
-    unsigned long expected = 0;
+    RmOff expected = 0;
+    gboolean done=FALSE;
 
     while(!done) {
         /* read in one extent */
-        struct fiemap *fm = rm_offset_get_fiemap(fd, 1, file_offset);
+        struct fiemap *fm = rm_offset_get_fiemap(fd, 1, logical);
         if(!fm) {
+            rm_log_debug_line("Get fiemap failed");
+            break;
+        }
+        if(fm->fm_mapped_extents == 0) {
+            rm_log_debug_line("No [more] extents");
             done = TRUE;
         } else {
-            if(!file_offset_next) {
-                /* no need to find end of fragment so one loop is enough*/
-                done = TRUE;
-            }
-            if(fm->fm_mapped_extents > 0) {
-                /* retrieve data from fiemap */
-                struct fiemap_extent *fm_ext = fm->fm_extents;
-                file_offset += fm_ext[0].fe_length;
+            rm_assert_gentle(fm->fm_mapped_extents == 1);
+
+            /* retrieve data from fiemap */
+            struct fiemap_extent fm_ext = fm->fm_extents[0];
+
+            if (result && fm_ext.fe_physical != expected) {
+                /* current extent is not contiguous with previous, ignore this extent and stop*/
+                done=TRUE;
+            } else {
+
                 if(result == 0) {
                     /* this is the first extent */
-                    result = fm_ext[0].fe_physical;
+                    result = fm_ext.fe_physical;
                     if(result == 0) {
                         /* looks suspicious - let's get out of here */
-                        done = TRUE;
-                    }
-                } else if(fm_ext[0].fe_physical > expected ||
-                          fm_ext[0].fe_physical < result) {
-                    /* current extent is not contiguous with previous, so we can stop*/
-                    done = TRUE;
-                    if(file_offset_next) {
-                        /* caller wants to know logical offset of next fragment */
-                        *file_offset_next = fm_ext[0].fe_logical;
+                        done=TRUE;
                     }
                 }
-                if(fm_ext[0].fe_flags & FIEMAP_EXTENT_LAST) {
-                    if(!done) {
-                        done = TRUE;
-                        if(file_offset_next) {
-                            /* caller wants to know logical offset of next fragment -
-                             * signal
-                             * that it is EOF */
-                            *file_offset_next =
-                                fm_ext[0].fe_logical + fm_ext[0].fe_length;
-                        }
-                    }
+
+                if(!logical_next) {
+                    /* no need to find end of contiguous section so one loop is enough*/
+                    done=TRUE;
+                } else if(fm_ext.fe_flags & FIEMAP_EXTENT_LAST) {
+                    done=TRUE;
                 }
-                if(!done) {
-                    expected = fm_ext[0].fe_physical + fm_ext[0].fe_length;
-                }
-            } else {
-                /* got no extents from rm_offset_get_fiemap */
-                done = true;
-                if(file_offset_next) {
-                    /* caller wants to know logical offset of next fragment but
-                     * we have an error... */
-                    *file_offset_next = 0;
-                }
+
+                logical += fm_ext.fe_length;
+                expected = fm_ext.fe_physical + fm_ext.fe_length;
             }
-            g_free(fm);
         }
+        g_free(fm);
+    }
+
+    if(logical_next) {
+        /* caller wants to know logical offset of next fragment */
+        *logical_next = logical;
     }
     return result;
 }
@@ -1117,7 +1142,6 @@ RmOff rm_offset_get_from_path(const char *path, RmOff file_offset,
 }
 
 bool rm_offsets_match(char *path1, char *path2) {
-    bool result = FALSE;
     int fd1 = rm_sys_open(path1, O_RDONLY);
     if(fd1 == -1) {
         rm_log_info_line("Error opening %s in rm_offsets_match", path1);
@@ -1131,24 +1155,22 @@ bool rm_offsets_match(char *path1, char *path2) {
         return FALSE;
     }
 
-    RmOff file1_offset_next = 0;
-    RmOff file2_offset_next = 0;
-    RmOff file_offset_current = 0;
-    while(!result &&
-          (rm_offset_get_from_fd(fd1, file_offset_current, &file1_offset_next) ==
-           rm_offset_get_from_fd(fd2, file_offset_current, &file2_offset_next)) &&
-          file1_offset_next != 0 && file1_offset_next == file2_offset_next) {
-        if(file1_offset_next == file_offset_current) {
-            /* phew, we got to the end */
-            result = TRUE;
-            break;
-        }
-        file_offset_current = file1_offset_next;
+    RmOff physical = 0;
+    RmOff logical = 0;
+    RmOff logical_next_1 = 0;
+    RmOff logical_next_2 = 0;
+    while((physical = rm_offset_get_from_fd(fd1, logical, &logical_next_1)) ==
+                      rm_offset_get_from_fd(fd2, logical, &logical_next_2) &&
+            physical &&
+            logical_next_1 == logical_next_2) {
+        logical = logical_next_1;
     }
 
+    rm_log_error_line("Result: %i Physical: %lu, Current: %lu, Next1: %lu, Next2: %lu", (physical==0 && logical_next_1 && logical_next_1 == logical_next_2), physical, logical, logical_next_1, logical_next_2);
     rm_sys_close(fd2);
     rm_sys_close(fd1);
-    return result;
+
+    return (physical==0 && logical_next_1 && logical_next_1 == logical_next_2);
 }
 
 #else /* Probably FreeBSD */

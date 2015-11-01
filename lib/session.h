@@ -50,6 +50,9 @@ typedef struct RmFileTables {
     /* Used for finding path doubles */
     GHashTable *unique_paths_table;
 
+    /* used for finding reflinks */
+    GHashTable *offset_table;
+
     // GHashTable *mtime_filter;
     // GHashTable *basename_filter;
     // GQueue *file_queue;

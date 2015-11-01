@@ -67,6 +67,11 @@ static RmNode *rm_node_insert(RmTrie *trie, RmNode *parent, const char *elem) {
         RmNode *node = rm_node_new(trie, elem);
         node->parent = parent;
         g_hash_table_insert(parent->children, node->basename, node);
+        if rm_mounts_is_mountpoint(elem) {
+            node->dev = rm_mounts_get_dev(elem);
+        } else {
+            node->dev = parent->dev;
+        }
         return node;
     }
 
@@ -280,6 +285,14 @@ void rm_trie_destroy(RmTrie *self) {
     g_mutex_clear(&self->lock);
 }
 
+gpointer rm_trie_search_up(RmTrie *self, RmNode *node, RmTrieIterCallback callback) {
+    gpointer result = callback(node);
+    if (result || !node->parent) {
+        return result;
+    }
+    return rm_trie_search_up(self, node->parent, callback);
+}
+
 #ifdef _RM_PATHTRICIA_BUILD_MAIN
 
 #include <stdio.h>
@@ -298,6 +311,7 @@ static int rm_trie_print_callback(_U RmTrie *self,
 
     return 0;
 }
+
 
 void rm_trie_print(RmTrie *self) {
     rm_trie_iter(self, NULL, true, true, rm_trie_print_callback, NULL);

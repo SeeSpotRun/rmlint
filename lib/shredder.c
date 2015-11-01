@@ -1158,6 +1158,7 @@ static gint rm_shred_group_preprocess(RmShredGroup *group) {
     }
 }
 
+
 static void rm_shred_preprocess_input(RmShredTag *main) {
     RmSession *session = main->session;
     guint removed = 0;
@@ -1171,17 +1172,21 @@ static void rm_shred_preprocess_input(RmShredTag *main) {
     /* move files from node tables into initial RmShredGroups */
     rm_log_debug_line("preparing size groups for shredding (dupe finding)...");
     RmFileTables *tables = session->tables;
+    
     while(tables->size_groups) {
         GSList *files = tables->size_groups->data;
         RmShredGroup *group = NULL;
+
         /* push files to shred group */
         while(files) {
             RmFile *file = files->data;
+                
             if(!group) {
                 /* create RmShredGroup using first file in size group as template*/
                 group = rm_shred_group_new(file);
                 group->digest_type = session->cfg->checksum_type;
             }
+
             rm_shred_file_preprocess(group, file, main);
             files = g_slist_delete_link(files, files);
         }

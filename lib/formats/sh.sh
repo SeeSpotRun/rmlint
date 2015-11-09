@@ -210,7 +210,7 @@ REMOVE_EDIR_CMD="rmdir"
 REMOVE_OTHER_CMD="rm -f"
 DELETE_VERB="Deleting"
 TRASH_CMD=
-#command -v gvfs-trash >/dev/null 2>&1 && { echo "found command gvfs-trash"; TRASH_CMD="gvfs-trash"; }
+command -v gvfs-trash >/dev/null 2>&1 && { echo "found command gvfs-trash"; TRASH_CMD="gvfs-trash"; }
 command -v trash-cli >/dev/null 2>&1 && { echo "found command trash-cli"; TRASH_CMD="trash-cli"; }
 
 while getopts "dhxnpt" OPTION

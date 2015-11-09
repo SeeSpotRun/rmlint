@@ -66,6 +66,7 @@ confirm() {
                 return 1
             ;;
             A)
+                echo "Aborting..."
                 exit 1
             ;;
             *)
@@ -241,14 +242,12 @@ Rmlint was executed in the following way:
    $ %s
 
 Execute this script with -d to bypass this message and delete found lint.
-Type any string to continue; CTRL-C, Enter or CTRL-D to abort immediately
+Type d to run non-interactively; enter to run interactively; CTRL-C to abort immediately
 EOF
     read eof_check
-    if [ -z "$eof_check" ]
+    if [ "$eof_check" == "d" ]
     then
-        # Count Ctrl-D and Enter as aborted too.
-        echo "Aborted on behalf of the user."
-        exit 1;
+        CONFIRM=D
     fi
 }
 

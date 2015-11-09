@@ -6,11 +6,75 @@
 USER='%s'
 GROUP='%s'
 
-# Set to true on -n
-DO_DRY_RUN=
+# Set according to S for option -n or D for option -d
+CONFIRM=unset
 
 # Set to true on -p
 DO_PARANOID_CHECK=
+
+
+####################
+# INTERACTIVE MODE #
+####################
+
+set_delete_commands() {
+    REMOVE_DUPE_CMD="rm -rf"
+    REMOVE_EDIR_CMD="rmdir"
+    REMOVE_OTHER_CMD="rm -f"
+    DELETE_VERB="Deleting"
+}
+
+set_trash_commands() {
+    if [ -z "$TRASH_CMD" ]
+    then
+     echo "Error: no trash command found"
+     return 1
+    fi
+    REMOVE_DUPE_CMD=$TRASH_CMD
+    REMOVE_EDIR_CMD=$TRASH_CMD
+    REMOVE_OTHER_CMD=$TRASH_CMD
+    DELETE_VERB="Trashing"
+    return 0
+}
+
+confirm() {
+
+    case $CONFIRM in
+        [DT]) return 0
+        ;;
+        S) return 1
+        ;;
+    esac
+
+    while :
+    do
+        echo "d: delete / D: delete all / t: trash / T: trash all / s: skip / S: skip all / A: abort?"
+        read CONFIRM
+        echo
+        case $CONFIRM in
+            [dD])
+                set_delete_commands
+                return 0
+            ;;
+            [tT])
+                if set_trash_commands
+                then
+                    return 0
+                fi
+            ;;
+            [sS])
+                return 1
+            ;;
+            A)
+                exit 1
+            ;;
+            *)
+                echo "Option not recognised"
+            ;;
+        esac
+    done
+}
+
 
 ##################################
 # GENERAL LINT HANDLER FUNCTIONS #
@@ -19,49 +83,49 @@ DO_PARANOID_CHECK=
 
 handle_emptyfile() {
     echo "$DELETE_VERB empty file:" "$1"
-    if [ -z "$DO_DRY_RUN" ]; then
+    if confirm; then
         $REMOVE_OTHER_CMD "$1"
     fi
 }
 
 handle_emptydir() {
     echo "$DELETE_VERB empty directory:" "$1"
-    if [ -z "$DO_DRY_RUN" ]; then
+    if confirm; then
         $REMOVE_EDIR_CMD "$1"
     fi
 }
 
 handle_bad_symlink() {
     echo "$DELETE_VERB symlink pointing nowhere:" "$1"
-    if [ -z "$DO_DRY_RUN" ]; then
+    if confirm; then
         $REMOVE_OTHER_CMD "$1"
     fi
 }
 
 handle_unstripped_binary() {
     echo "Stripping debug symbols of:" "$1"
-    if [ -z "$DO_DRY_RUN" ]; then
+    if [ "$CONFIRM" != "S" ]; then
         strip -s "$1"
     fi
 }
 
 handle_bad_user_id() {
     echo "chown" "$USER" "$1"
-    if [ -z "$DO_DRY_RUN" ]; then
+    if [ "$CONFIRM" != "S" ]; then
         chown "$USER" "$1"
     fi
 }
 
 handle_bad_group_id() {
     echo "chgrp" "$GROUP" "$1"
-    if [ -z "$DO_DRY_RUN" ]; then
+    if [ "$CONFIRM" != "S" ]; then
         chgrp "$GROUP" "$1"
     fi
 }
 
 handle_bad_user_and_group_id() {
     echo "chown" "$USER:$GROUP" "$1"
-    if [ -z "$DO_DRY_RUN" ]; then
+    if [ "$CONFIRM" != "S" ]; then
         chown "$USER:$GROUP" "$1"
     fi
 }
@@ -103,7 +167,7 @@ original_check() {
 cp_hardlink() {
     echo "Hardlinking to original:" "$1"
     if original_check "$1" "$2"; then
-        if [ -z "$DO_DRY_RUN" ]; then
+        if [ "$CONFIRM" != "S" ]; then
             cp --remove-destination --archive --link "$2" "$1"
         fi
     fi
@@ -112,7 +176,7 @@ cp_hardlink() {
 cp_symlink() {
     echo "Symlinking to original:" "$1"
     if original_check "$1" "$2"; then
-        if [ -z "$DO_DRY_RUN" ]; then
+        if [ "$CONFIRM" != "S" ]; then
             touch -mr "$1" "$0"
             cp --remove-destination --archive --symbolic-link "$2" "$1"
             touch -mr "$0" "$1"
@@ -124,7 +188,7 @@ cp_reflink() {
     # reflink $1 to $2's data, preserving $1's  mtime
     echo "Reflinking to original:" "$1"
     if original_check "$1" "$2"; then
-        if [ -z "$DO_DRY_RUN" ]; then
+        if [ "$CONFIRM" != "S" ]; then
             touch -mr "$1" "$0"
             cp --reflink=always "$2" "$1"
             touch -mr "$0" "$1"
@@ -135,7 +199,7 @@ cp_reflink() {
 clone() {
     # clone $1 from $2's data
     echo "Cloning to: " "$1"
-    if [ -z "$DO_DRY_RUN" ]; then
+    if [ "$CONFIRM" != "S" ]; then
         rmlint --btrfs-clone "$2" "$1"
     fi
 }
@@ -156,7 +220,7 @@ user_command() {
 remove_cmd() {
     echo "$DELETE_VERB:" "$1"
     if original_check "$1" "$2"; then
-        if [ -z "$DO_DRY_RUN" ]; then
+        if confirm; then
             $REMOVE_DUPE_CMD "$1"
         fi
     fi
@@ -176,7 +240,7 @@ Rmlint was executed in the following way:
 
    $ %s
 
-Execute this script with -d to disable this informational message.
+Execute this script with -d to bypass this message and delete found lint.
 Type any string to continue; CTRL-C, Enter or CTRL-D to abort immediately
 EOF
     read eof_check
@@ -195,7 +259,7 @@ usage: $0 OPTIONS
 OPTIONS:
 
   -h   Show this message.
-  -d   Do not ask before running.
+  -d   Delete (or otherwise process) all lint non-interactively.
   -t   Move files to trash instead of deleting (requires gvfs-trash or trash-cli)
   -x   Keep rmlint.sh; do not autodelete it.
   -p   Recheck that files are still identical before removing duplicates.
@@ -204,11 +268,7 @@ EOF
 }
 
 DO_REMOVE=
-DO_ASK=
-REMOVE_DUPE_CMD="rm -rf"
-REMOVE_EDIR_CMD="rmdir"
-REMOVE_OTHER_CMD="rm -f"
-DELETE_VERB="Deleting"
+set_delete_commands
 TRASH_CMD=
 command -v gvfs-trash >/dev/null 2>&1 && { echo "found command gvfs-trash"; TRASH_CMD="gvfs-trash"; }
 command -v trash-cli >/dev/null 2>&1 && { echo "found command trash-cli"; TRASH_CMD="trash-cli"; }
@@ -221,27 +281,24 @@ do
        exit 1
        ;;
      d)
-       DO_ASK=false
+       CONFIRM=D
        ;;
      x)
        DO_REMOVE=false
        ;;
      n)
-       DO_DRY_RUN=true
+       CONFIRM=S
        ;;
      p)
        DO_PARANOID_CHECK=true
        ;;
      t)
-       if [[ -z "$TRASH_CMD" ]]
+       if ! set_trash_commands
        then
-         echo "Error: no trash command found - exiting"
-         exit 1
+           echo "Aborting"
+           exit 1
        fi
-       REMOVE_DUPE_CMD=$TRASH_CMD
-       REMOVE_EDIR_CMD=$TRASH_CMD
-       REMOVE_OTHER_CMD=$TRASH_CMD
-       DELETE_VERB="Trashing"
+       ;;
   esac
 done
 

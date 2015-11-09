@@ -18,49 +18,49 @@ DO_PARANOID_CHECK=
 
 
 handle_emptyfile() {
-    echo 'Deleting empty file:' "$1"
+    echo "$DELETE_VERB empty file:" "$1"
     if [ -z "$DO_DRY_RUN" ]; then
-        rm -f "$1"
+        $REMOVE_OTHER_CMD "$1"
     fi
 }
 
 handle_emptydir() {
-    echo 'Deleting empty directory:' "$1"
+    echo "$DELETE_VERB empty directory:" "$1"
     if [ -z "$DO_DRY_RUN" ]; then
-        rmdir "$1"
+        $REMOVE_EDIR_CMD "$1"
     fi
 }
 
 handle_bad_symlink() {
-    echo 'Deleting symlink pointing nowhere:' "$1"
+    echo "$DELETE_VERB symlink pointing nowhere:" "$1"
     if [ -z "$DO_DRY_RUN" ]; then
-        rm -f "$1"
+        $REMOVE_OTHER_CMD "$1"
     fi
 }
 
 handle_unstripped_binary() {
-    echo 'Stripping debug symbols of:' "$1"
+    echo "Stripping debug symbols of:" "$1"
     if [ -z "$DO_DRY_RUN" ]; then
         strip -s "$1"
     fi
 }
 
 handle_bad_user_id() {
-    echo 'chown' "$USER" "$1"
+    echo "chown" "$USER" "$1"
     if [ -z "$DO_DRY_RUN" ]; then
         chown "$USER" "$1"
     fi
 }
 
 handle_bad_group_id() {
-    echo 'chgrp' "$GROUP" "$1"
+    echo "chgrp" "$GROUP" "$1"
     if [ -z "$DO_DRY_RUN" ]; then
         chgrp "$GROUP" "$1"
     fi
 }
 
 handle_bad_user_and_group_id() {
-    echo 'chown' "$USER:$GROUP" "$1"
+    echo "chown" "$USER:$GROUP" "$1"
     if [ -z "$DO_DRY_RUN" ]; then
         chown "$USER:$GROUP" "$1"
     fi
@@ -101,7 +101,7 @@ original_check() {
 }
 
 cp_hardlink() {
-    echo 'Hardlinking to original:' "$1"
+    echo "Hardlinking to original:" "$1"
     if original_check "$1" "$2"; then
         if [ -z "$DO_DRY_RUN" ]; then
             cp --remove-destination --archive --link "$2" "$1"
@@ -110,7 +110,7 @@ cp_hardlink() {
 }
 
 cp_symlink() {
-    echo 'Symlinking to original:' "$1"
+    echo "Symlinking to original:" "$1"
     if original_check "$1" "$2"; then
         if [ -z "$DO_DRY_RUN" ]; then
             touch -mr "$1" "$0"
@@ -122,7 +122,7 @@ cp_symlink() {
 
 cp_reflink() {
     # reflink $1 to $2's data, preserving $1's  mtime
-    echo 'Reflinking to original:' "$1"
+    echo "Reflinking to original:" "$1"
     if original_check "$1" "$2"; then
         if [ -z "$DO_DRY_RUN" ]; then
             touch -mr "$1" "$0"
@@ -134,18 +134,18 @@ cp_reflink() {
 
 clone() {
     # clone $1 from $2's data
-    echo 'Cloning to: ' "$1"
+    echo "Cloning to: " "$1"
     if [ -z "$DO_DRY_RUN" ]; then
         rmlint --btrfs-clone "$2" "$1"
     fi
 }
 
 skip_hardlink() {
-    echo 'Leaving as-is (already hardlinked to original):' "$1"
+    echo "Leaving as-is (already hardlinked to original):" "$1"
 }
 
 skip_reflink() {
-    echo 'Leaving as-is (already reflinked to original):' "$1"
+    echo "Leaving as-is (already reflinked to original):" "$1"
 }
 
 user_command() {
@@ -154,10 +154,10 @@ user_command() {
 }
 
 remove_cmd() {
-    echo 'Deleting:' "$1"
+    echo "$DELETE_VERB:" "$1"
     if original_check "$1" "$2"; then
         if [ -z "$DO_DRY_RUN" ]; then
-            rm -rf "$1"
+            $REMOVE_DUPE_CMD "$1"
         fi
     fi
 }
@@ -196,6 +196,7 @@ OPTIONS:
 
   -h   Show this message.
   -d   Do not ask before running.
+  -t   Move files to trash instead of deleting (requires gvfs-trash or trash-cli)
   -x   Keep rmlint.sh; do not autodelete it.
   -p   Recheck that files are still identical before removing duplicates.
   -n   Do not perform any modifications, just print what would be done.
@@ -204,8 +205,15 @@ EOF
 
 DO_REMOVE=
 DO_ASK=
+REMOVE_DUPE_CMD="rm -rf"
+REMOVE_EDIR_CMD="rmdir"
+REMOVE_OTHER_CMD="rm -f"
+DELETE_VERB="Deleting"
+TRASH_CMD=
+#command -v gvfs-trash >/dev/null 2>&1 && { echo "found command gvfs-trash"; TRASH_CMD="gvfs-trash"; }
+command -v trash-cli >/dev/null 2>&1 && { echo "found command trash-cli"; TRASH_CMD="trash-cli"; }
 
-while getopts "dhxnp" OPTION
+while getopts "dhxnpt" OPTION
 do
   case $OPTION in
      h)
@@ -223,6 +231,17 @@ do
        ;;
      p)
        DO_PARANOID_CHECK=true
+       ;;
+     t)
+       if [[ -z "$TRASH_CMD" ]]
+       then
+         echo "Error: no trash command found - exiting"
+         exit 1
+       fi
+       REMOVE_DUPE_CMD=$TRASH_CMD
+       REMOVE_EDIR_CMD=$TRASH_CMD
+       REMOVE_OTHER_CMD=$TRASH_CMD
+       DELETE_VERB="Trashing"
   esac
 done
 

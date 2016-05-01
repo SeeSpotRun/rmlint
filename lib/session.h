@@ -141,6 +141,13 @@ typedef struct RmSession {
 void rm_session_init(RmSession *session, RmCfg *cfg);
 
 /**
+ * @brief Run the rmlint session.
+ *
+ * @return exit_status for exit()
+ */
+int rm_session_run(RmSession *session);
+
+/**
  * @brief Clear all memory allocated by rm_session_init.
  */
 void rm_session_clear(RmSession *session);

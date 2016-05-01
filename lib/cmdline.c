@@ -40,15 +40,8 @@
 #include <glib/gstdio.h>
 
 #include "cmdline.h"
-#include "treemerge.h"
-#include "traverse.h"
-#include "preprocess.h"
-#include "shredder.h"
-#include "utilities.h"
 #include "formats.h"
-#include "replay.h"
 #include "hash-utility.h"
-#include "md-scheduler.h"
 
 #if HAVE_BTRFS_H
 #include <sys/ioctl.h>
@@ -1122,6 +1115,114 @@ static gboolean rm_cmd_parse_sortby(_UNUSED const char *option_name,
     return true;
 }
 
+static size_t rm_cmd_parse_pattern(const char *pattern, GRegex **regex, GError **error) {
+    if(*pattern != '<') {
+        g_set_error(error, RM_ERROR_QUARK, 0, _("Pattern has to start with `<`"));
+        return 0;
+    }
+
+    /* Balance of start and end markers */
+    int balance = 1;
+    char *iter = (char *)pattern;
+    char *last = iter;
+
+    while((iter = strpbrk(&iter[1], "<>"))) {
+        if(iter[-1] == '\\') {
+            /* escaped, skip */
+            break;
+        }
+
+        if(iter && *iter == '<') {
+            ++balance;
+        } else if(iter) {
+            --balance;
+            last = iter;
+        }
+
+        if(balance == 0) {
+            break;
+        }
+    }
+
+    if(balance != 0) {
+        g_set_error(error, RM_ERROR_QUARK, 0, _("`<` or `>` imbalance: %d"), balance);
+        return 0;
+    }
+
+    size_t src_len = (last - pattern - 1);
+
+    if(src_len == 0) {
+        g_set_error(error, RM_ERROR_QUARK, 0, _("empty pattern"));
+        return 0;
+    }
+
+    GString *part = g_string_new_len(&pattern[1], src_len);
+
+    rm_log_debug_line("Compiled pattern: %s\n", part->str);
+
+    /* Actually compile the pattern: */
+    *regex = g_regex_new(part->str, G_REGEX_RAW | G_REGEX_OPTIMIZE, 0, error);
+
+    g_string_free(part, TRUE);
+
+    /* Include <> in the result len */
+    return src_len + 2;
+}
+
+/* Compile all regexes inside a sortcriteria string.
+ * Every regex (enclosed in <>)  will be removed from the
+ * sortcriteria spec, so that the returned string will
+ * consist only of single letters.
+ */
+static char *rm_cmd_compile_patterns(RmSession *session, const char *sortcrit,
+                                     GError **error) {
+    /* Total of encountered patterns */
+    int pattern_count = 0;
+
+    /* Copy of the sortcriteria without pattern specs in <> */
+    size_t minified_cursor = 0;
+    char *minified_sortcrit = g_strdup(sortcrit);
+
+    for(size_t i = 0; sortcrit[i]; i++) {
+        /* Copy everything that is not a regex pattern */
+        minified_sortcrit[minified_cursor++] = sortcrit[i];
+        char curr_crit = tolower((unsigned char)sortcrit[i]);
+
+        /* Check if it's a non-regex sortcriteria */
+        if(!((curr_crit == 'r' || curr_crit == 'x') && sortcrit[i + 1] == '<')) {
+            continue;
+        }
+
+        GRegex *regex = NULL;
+
+        /* Jump over the regex pattern part */
+        i += rm_cmd_parse_pattern(&sortcrit[i + 1], &regex, error);
+
+        if(regex != NULL) {
+            if(pattern_count < (int)RM_PATTERN_N_MAX && pattern_count != -1) {
+                /* Append to already compiled patterns */
+                g_ptr_array_add(session->pattern_cache, regex);
+                pattern_count++;
+            } else if(pattern_count != -1) {
+                g_set_error(error, RM_ERROR_QUARK, 0,
+                            _("Cannot add more than %ld regex patterns."),
+                            RM_PATTERN_N_MAX);
+
+                /* Make sure to set the warning only once */
+                pattern_count = -1;
+                g_regex_unref(regex);
+            } else {
+                g_regex_unref(regex);
+            }
+        }
+    }
+
+    g_prefix_error(error, _("Error while parsing sortcriteria patterns: "));
+
+    minified_sortcrit[minified_cursor] = 0;
+    return minified_sortcrit;
+}
+
 static gboolean rm_cmd_parse_rankby(_UNUSED const char *option_name,
                                     const gchar *criteria, RmSession *session,
                                     GError **error) {
@@ -1129,7 +1230,7 @@ static gboolean rm_cmd_parse_rankby(_UNUSED const char *option_name,
 
     g_free(cfg->sort_criteria);
 
-    cfg->sort_criteria = rm_pp_compile_patterns(session, criteria, error);
+    cfg->sort_criteria = rm_cmd_compile_patterns(session, criteria, error);
 
     if(error && *error != NULL) {
         return false;
@@ -1489,94 +1590,4 @@ failure:
 
     g_option_context_free(option_parser);
     return !(session->cmdline_parse_error);
-}
-
-static int rm_cmd_replay_main(RmSession *session) {
-    /* User chose to replay some json files. */
-    RmParrotCage cage;
-    rm_parrot_cage_open(&cage, session);
-
-    for(GList *iter = session->replay_files.head; iter; iter = iter->next) {
-        rm_parrot_cage_load(&cage, iter->data);
-    }
-
-    rm_parrot_cage_close(&cage);
-    rm_fmt_flush(session->formats);
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PRE_SHUTDOWN);
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SUMMARY);
-
-    return EXIT_SUCCESS;
-}
-
-int rm_cmd_main(RmSession *session) {
-    int exit_state = EXIT_SUCCESS;
-    RmCfg *cfg = session->cfg;
-
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_INIT);
-
-    if(session->replay_files.length) {
-        return rm_cmd_replay_main(session);
-    }
-
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
-
-    if(cfg->list_mounts) {
-        session->mounts = rm_mounts_table_new(cfg->fake_fiemap);
-    }
-
-    if(session->mounts == NULL) {
-        rm_log_debug_line("No mount table created.");
-    }
-
-    session->mds = rm_mds_new(cfg->threads, session->mounts, cfg->fake_pathindex_as_disk);
-
-    rm_traverse_tree(session);
-
-    rm_log_debug_line("List build finished at %.3f with %d files",
-                      g_timer_elapsed(session->timer, NULL), session->total_files);
-
-    if(cfg->merge_directories) {
-        rm_assert_gentle(cfg->cache_file_structs);
-        session->dir_merger = rm_tm_new(session);
-    }
-
-    if(session->total_files >= 1) {
-        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
-        rm_preprocess(session);
-
-        if(cfg->find_duplicates || cfg->merge_directories) {
-            rm_shred_run(session);
-
-            rm_log_debug_line("Dupe search finished at time %.3f",
-                              g_timer_elapsed(session->timer, NULL));
-        } else {
-            /* Clear leftovers */
-            rm_file_tables_clear(session);
-        }
-    }
-
-    if(cfg->merge_directories) {
-        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
-        rm_tm_finish(session->dir_merger);
-    }
-
-    rm_fmt_flush(session->formats);
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PRE_SHUTDOWN);
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SUMMARY);
-
-    if(session->shred_bytes_remaining != 0) {
-        rm_log_error_line("BUG: Number of remaining bytes is %" LLU
-                          " (not 0). Please report this.",
-                          session->shred_bytes_remaining);
-        exit_state = EXIT_FAILURE;
-    }
-
-    if(session->shred_files_remaining != 0) {
-        rm_log_error_line("BUG: Number of remaining files is %" LLU
-                          " (not 0). Please report this.",
-                          session->shred_files_remaining);
-        exit_state = EXIT_FAILURE;
-    }
-
-    return exit_state;
 }

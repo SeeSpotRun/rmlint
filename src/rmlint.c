@@ -130,7 +130,7 @@ int main(int argc, const char **argv) {
     /* Parse commandline */
     if(rm_cmd_parse_args(argc, (char **)argv, &session) != 0) {
         /* Do all the real work */
-        exit_state = rm_cmd_main(&session);
+        exit_state = rm_session_run(&session);
     }
 
     rm_session_clear(&session);

@@ -32,6 +32,13 @@
 #include "formats.h"
 #include "traverse.h"
 #include "preprocess.h"
+#include "replay.h"
+#include "md-scheduler.h"
+#include "treemerge.h"
+#include "traverse.h"
+#include "preprocess.h"
+#include "shredder.h"
+#include "utilities.h"
 
 #if HAVE_UNAME
 #include "sys/utsname.h"
@@ -161,4 +168,94 @@ bool rm_session_was_aborted() {
     }
 
     return rc;
+}
+
+static int rm_session_replay(RmSession *session) {
+    /* User chose to replay some json files. */
+    RmParrotCage cage;
+    rm_parrot_cage_open(&cage, session);
+
+    for(GList *iter = session->replay_files.head; iter; iter = iter->next) {
+        rm_parrot_cage_load(&cage, iter->data);
+    }
+
+    rm_parrot_cage_close(&cage);
+    rm_fmt_flush(session->formats);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PRE_SHUTDOWN);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SUMMARY);
+
+    return EXIT_SUCCESS;
+}
+
+int rm_session_run(RmSession *session) {
+    int exit_state = EXIT_SUCCESS;
+    RmCfg *cfg = session->cfg;
+
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_INIT);
+
+    if(session->replay_files.length) {
+        return rm_session_replay(session);
+    }
+
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+
+    if(cfg->list_mounts) {
+        session->mounts = rm_mounts_table_new(cfg->fake_fiemap);
+    }
+
+    if(session->mounts == NULL) {
+        rm_log_debug_line("No mount table created.");
+    }
+
+    session->mds = rm_mds_new(cfg->threads, session->mounts, cfg->fake_pathindex_as_disk);
+
+    rm_traverse_tree(session);
+
+    rm_log_debug_line("List build finished at %.3f with %d files",
+                      g_timer_elapsed(session->timer, NULL), session->total_files);
+
+    if(cfg->merge_directories) {
+        rm_assert_gentle(cfg->cache_file_structs);
+        session->dir_merger = rm_tm_new(session);
+    }
+
+    if(session->total_files >= 1) {
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
+        rm_preprocess(session);
+
+        if(cfg->find_duplicates || cfg->merge_directories) {
+            rm_shred_run(session);
+
+            rm_log_debug_line("Dupe search finished at time %.3f",
+                              g_timer_elapsed(session->timer, NULL));
+        } else {
+            /* Clear leftovers */
+            rm_file_tables_clear(session);
+        }
+    }
+
+    if(cfg->merge_directories) {
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
+        rm_tm_finish(session->dir_merger);
+    }
+
+    rm_fmt_flush(session->formats);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PRE_SHUTDOWN);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SUMMARY);
+
+    if(session->shred_bytes_remaining != 0) {
+        rm_log_error_line("BUG: Number of remaining bytes is %" LLU
+                          " (not 0). Please report this.",
+                          session->shred_bytes_remaining);
+        exit_state = EXIT_FAILURE;
+    }
+
+    if(session->shred_files_remaining != 0) {
+        rm_log_error_line("BUG: Number of remaining files is %" LLU
+                          " (not 0). Please report this.",
+                          session->shred_files_remaining);
+        exit_state = EXIT_FAILURE;
+    }
+
+    return exit_state;
 }

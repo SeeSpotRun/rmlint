@@ -296,23 +296,25 @@ static void rm_fmt_prog(RmSession *session,
         return;
     }
 
-    if(session->replay_files.length > 0) {
+    if(session->cfg->replay_files.length > 0) {
         /* Makes not much sense to print a progressbar with --replay */
         return;
     }
 
     if(state == RM_PROGRESS_STATE_INIT) {
         /* Do initializiation here */
-        const char *update_interval_str =
-            rm_fmt_get_config_value(session->formats, "progressbar", "update_interval");
+        const char *update_interval_str = rm_fmt_get_config_value(
+            session->cfg->formats, "progressbar", "update_interval");
 
         self->plain = true;
-        if(rm_fmt_get_config_value(session->formats, "progressbar", "fancy") != NULL) {
+        if(rm_fmt_get_config_value(session->cfg->formats, "progressbar", "fancy") !=
+           NULL) {
             self->plain = false;
         }
 
         self->use_unicode_glyphs = true;
-        if(rm_fmt_get_config_value(session->formats, "progressbar", "ascii") != NULL) {
+        if(rm_fmt_get_config_value(session->cfg->formats, "progressbar", "ascii") !=
+           NULL) {
             self->use_unicode_glyphs = false;
         }
 

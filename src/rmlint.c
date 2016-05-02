@@ -128,7 +128,7 @@ int main(int argc, const char **argv) {
 #endif
 
     /* Parse commandline */
-    if(rm_cmd_parse_args(argc, (char **)argv, &session) != 0) {
+    if(rm_cmd_parse_args(argc, (char **)argv, session.cfg) != 0) {
         /* Do all the real work */
         exit_state = rm_session_run(&session);
     }

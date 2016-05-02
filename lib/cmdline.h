@@ -26,14 +26,15 @@
 #ifndef RM_CMDLINE_H
 #define RM_CMDLINE_H
 
-#include "session.h"
+#include <stdbool.h>
+#include "cfg.h"
 
 /**
- * @brief Parse all arguments specified in argc/argv and set the aprop. cfg
- * in session->cfg.
+ * @brief Parse all arguments specified in argc/argv and set the apropriate
+ * fields in cfg
  *
  * @return false on parse error (running makes no sense then)
  */
-bool rm_cmd_parse_args(int argc, char **argv, RmSession *session);
+bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg);
 
 #endif

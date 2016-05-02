@@ -242,7 +242,7 @@ int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *s
         return (b->is_prefd - a->is_prefd);
     } else {
         /* Only fill in path if we have a pattern in sort_criteria */
-        bool path_needed = (session->pattern_cache->len > 0);
+        bool path_needed = (session->cfg->pattern_cache->len > 0);
         RM_DEFINE_PATH_IF_NEEDED(a, path_needed);
         RM_DEFINE_PATH_IF_NEEDED(b, path_needed);
 
@@ -268,17 +268,17 @@ int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *s
                 break;
             case 'x': {
                 cmp = rm_pp_cmp_by_regex(
-                    g_ptr_array_index(session->pattern_cache, regex_cursor), regex_cursor,
-                    (RmPatternBitmask *)&a->pattern_bitmask_basename, a->folder->basename,
-                    (RmPatternBitmask *)&b->pattern_bitmask_basename,
+                    g_ptr_array_index(session->cfg->pattern_cache, regex_cursor),
+                    regex_cursor, (RmPatternBitmask *)&a->pattern_bitmask_basename,
+                    a->folder->basename, (RmPatternBitmask *)&b->pattern_bitmask_basename,
                     b->folder->basename);
                 regex_cursor++;
                 break;
             }
             case 'r':
                 cmp = rm_pp_cmp_by_regex(
-                    g_ptr_array_index(session->pattern_cache, regex_cursor), regex_cursor,
-                    (RmPatternBitmask *)&a->pattern_bitmask_path, a_path,
+                    g_ptr_array_index(session->cfg->pattern_cache, regex_cursor),
+                    regex_cursor, (RmPatternBitmask *)&a->pattern_bitmask_path, a_path,
                     (RmPatternBitmask *)&b->pattern_bitmask_path, b_path);
                 regex_cursor++;
                 break;
@@ -410,7 +410,7 @@ static gboolean rm_pp_handle_inode_clusters(_UNUSED gpointer key, GQueue *inode_
     }
 
     /* update counters */
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
+    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PREPROCESS);
 
     rm_assert_gentle(inode_cluster->length <= 1);
     if(inode_cluster->length == 1) {
@@ -446,7 +446,7 @@ static RmOff rm_pp_handler_other_lint(const RmSession *session) {
 
             num_handled++;
 
-            rm_fmt_write(file, session->formats, -1);
+            rm_fmt_write(file, session->cfg->formats, -1);
         }
 
         if(!session->cfg->cache_file_structs) {
@@ -525,5 +525,5 @@ void rm_preprocess(RmSession *session) {
         "of %d",
         g_timer_elapsed(session->timer, NULL), removed, session->total_files);
 
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
+    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PREPROCESS);
 }

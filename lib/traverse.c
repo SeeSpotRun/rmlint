@@ -122,7 +122,7 @@ static void rm_traverse_file(RmTravSession *trav_session, RmStat *statp, char *p
     RmSession *session = trav_session->session;
     RmCfg *cfg = session->cfg;
 
-    if(rm_fmt_is_a_output(session->formats, path)) {
+    if(rm_fmt_is_a_output(session->cfg->formats, path)) {
         /* ignore files which are rmlint outputs */
         return;
     }
@@ -176,7 +176,7 @@ static void rm_traverse_file(RmTravSession *trav_session, RmStat *statp, char *p
         rm_file_list_insert_file(file, session);
 
         g_atomic_int_add(&trav_session->session->total_files, 1);
-        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+        rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_TRAVERSE);
 
         if(trav_session->session->cfg->clear_xattr_fields &&
            file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
@@ -449,7 +449,7 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *trav_sess
     fts_close(ftsp);
 
     // rm_file_list_insert_queue(, session);
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_TRAVERSE);
 
 done:
     rm_mds_device_ref(buffer->disk, -1);
@@ -513,5 +513,5 @@ void rm_traverse_tree(RmSession *session) {
     rm_traverse_session_free(trav_session);
 
     session->traverse_finished = TRUE;
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_TRAVERSE);
 }

@@ -54,8 +54,6 @@ typedef struct RmFileTables {
     GMutex lock;
 } RmFileTables;
 
-struct RmFmtTable;
-
 typedef struct RmSession {
     RmCfg *cfg;
 
@@ -65,9 +63,6 @@ typedef struct RmSession {
     /* Table of mountpoints used in the system */
     struct RmMountTable *mounts;
 
-    /* Output formatting control */
-    struct RmFmtTable *formats;
-
     /* Treemerging for -D */
     struct RmTreeMerger *dir_merger;
 
@@ -76,9 +71,6 @@ typedef struct RmSession {
 
     /* Disk Scheduler */
     struct _RmMDS *mds;
-
-    /* Cache of already compiled GRegex patterns */
-    GPtrArray *pattern_cache;
 
     /* Counters for printing useful statistics */
     volatile gint total_files;
@@ -106,33 +98,12 @@ typedef struct RmSession {
     RmOff offsets_read;
     RmOff offset_fails;
 
-    /* Daniels paranoia */
-    RmOff hash_seed1;
-    RmOff hash_seed2;
-
-    /* count used for determining the verbosity level */
-    int verbosity_count;
-
-    /* count used for determining the paranoia level */
-    int paranoia_count;
-
-    /* count for -o and -O; initialized to -1 */
-    int output_cnt[2];
-
-    /* true if a cmdline parse error happened */
-    bool cmdline_parse_error;
-
     /* true once shredder finished running */
     bool shredder_finished;
 
     /* true once traverse finished running */
     bool traverse_finished;
 
-    /* List of path to json files that should be re-outputted. */
-    GQueue replay_files;
-
-    /* Version of the linux kernel (0 on other operating systems) */
-    int kernel_version[2];
 } RmSession;
 
 /**
@@ -168,17 +139,6 @@ void rm_session_abort(void);
  * Threadsafe.
  */
 bool rm_session_was_aborted(void);
-
-/**
- * @brief Check the kernel version of the Linux kernel.
- *
- * @param session Session to ask. Version is cached in the session.
- * @param major The major version it should have at least.
- * @param minor The minor version it should have at least.
- *
- * @return True if the kernel is recent enough.
- */
-bool rm_session_check_kernel_version(RmSession *session, int major, int minor);
 
 /* Maybe colors, for use outside of the rm_log macros,
  * in order to work with the --with-no-color option

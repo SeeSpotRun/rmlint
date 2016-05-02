@@ -56,9 +56,9 @@ typedef struct RmFileTables {
 
 typedef struct RmCounters {
     /* Counters for printing useful statistics */
-    volatile gint total_files;
-    volatile gint ignored_files;
-    volatile gint ignored_folders;
+    gint total_files;
+    gint ignored_files;
+    gint ignored_folders;
 
     RmOff total_filtered_files;
     RmOff total_lint_size;

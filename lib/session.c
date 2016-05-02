@@ -39,6 +39,7 @@
 #include "preprocess.h"
 #include "shredder.h"
 #include "utilities.h"
+#include "xattr.h"
 
 void rm_session_init(RmSession *session) {
     memset(session, 0, sizeof(RmSession));
@@ -80,6 +81,8 @@ void rm_session_clear(RmSession *session) {
 
     g_queue_clear(&session->cfg->replay_files);
     rm_trie_destroy(&cfg->file_trie);
+
+    g_slice_free(RmCounters, session->counters);
 }
 
 volatile int SESSION_ABORTED;
@@ -129,7 +132,31 @@ static int rm_session_replay(RmSession *session) {
     return EXIT_SUCCESS;
 }
 
+/* threadpool to receive files from traverser.
+ * single threaded; assumes safe access to tables->all_files
+ * and counters->total_files.
+ */
+static void rm_session_file_pool(RmFile *file, RmSession *session) {
+    if(rm_mounts_is_evil(session->mounts, file->dev)) {
+        /* A file in an evil fs. Ignore.
+         * Counter is also accessed by traverse.c (TODO!) so need
+         * to increment atomically */
+        g_atomic_int_inc(&session->counters->ignored_files);
+        return;
+    }
+    if(session->cfg->clear_xattr_fields &&
+       file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+        rm_xattr_clear_hash(session->cfg, file);
+    }
+    g_queue_push_tail(session->tables->all_files, file);
+
+    if(session->counters->total_files++ % 100 == 0) {
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+    }
+}
+
 int rm_session_run(RmSession *session) {
+    /* --- Setup --- */
     int exit_state = EXIT_SUCCESS;
     RmCfg *cfg = session->cfg;
 
@@ -151,17 +178,29 @@ int rm_session_run(RmSession *session) {
 
     session->mds = rm_mds_new(cfg->threads, session->mounts, cfg->fake_pathindex_as_disk);
 
-    rm_traverse_tree(session->cfg, session->formats, session->counters, session->mounts,
-                     session->mds, session->tables);
-
-    rm_log_debug_line("List build finished at %.3f with %d files",
-                      g_timer_elapsed(session->timer, NULL),
-                      session->counters->total_files);
-
     if(cfg->merge_directories) {
         rm_assert_gentle(cfg->cache_file_structs);
         session->dir_merger = rm_tm_new(session);
     }
+
+    /* --- Traversal --- */
+
+    /* Create a single-threaded pool to receive files from traverse */
+    GThreadPool *file_pool =
+        rm_util_thread_pool_new((GFunc)rm_session_file_pool, session, 1);
+
+    rm_traverse_tree(session->cfg, file_pool, session->formats, session->counters,
+                     session->mds);
+
+    g_thread_pool_free(file_pool, FALSE, TRUE);
+
+    rm_log_debug_line(
+        "List build finished at %.3f with %d files; ignored %d hidden files and %d "
+        "hidden folders",
+        g_timer_elapsed(session->timer, NULL), session->counters->total_files,
+        session->counters->ignored_files, session->counters->ignored_folders);
+
+    /* --- Preprocessing --- */
 
     if(session->counters->total_files >= 1) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
@@ -188,16 +227,18 @@ int rm_session_run(RmSession *session) {
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SUMMARY);
 
     if(session->counters->shred_bytes_remaining != 0) {
-        rm_log_error_line("BUG: Number of remaining bytes is %" LLU
-                          " (not 0). Please report this.",
-                          session->counters->shred_bytes_remaining);
+        rm_log_error_line(
+            "BUG: Number of remaining bytes is %lu"
+            " (not 0). Please report this.",
+            session->counters->shred_bytes_remaining);
         exit_state = EXIT_FAILURE;
     }
 
     if(session->counters->shred_files_remaining != 0) {
-        rm_log_error_line("BUG: Number of remaining files is %" LLU
-                          " (not 0). Please report this.",
-                          session->counters->shred_files_remaining);
+        rm_log_error_line(
+            "BUG: Number of remaining files is %lu"
+            " (not 0). Please report this.",
+            session->counters->shred_files_remaining);
         exit_state = EXIT_FAILURE;
     }
 

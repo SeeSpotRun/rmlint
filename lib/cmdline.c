@@ -1426,5 +1426,7 @@ failure:
     }
 
     g_option_context_free(option_parser);
-    return !(cmd->cmdline_parse_error);
+    bool result = !(cmd->cmdline_parse_error);
+    g_slice_free(RmCmdSession, cmd);
+    return result;
 }

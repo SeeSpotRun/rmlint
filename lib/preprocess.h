@@ -49,13 +49,6 @@ RmFileTables *rm_file_tables_new(const RmSession *session);
 void rm_file_tables_destroy(RmFileTables *list);
 
 /**
- * @brief Appends a file in RmFileTables->all_files.
- * @param file The file to insert; ownership is taken.
- */
-
-void rm_file_list_insert_file(RmFile *file, RmFileTables *tables);
-
-/**
  * @brief Clear potential leftover files when shredder was not used.
  */
 void rm_file_tables_clear(const RmSession *session);

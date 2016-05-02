@@ -293,12 +293,6 @@ int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *s
     }
 }
 
-void rm_file_list_insert_file(RmFile *file, RmFileTables *tables) {
-    g_mutex_lock(&tables->lock);
-    { g_queue_push_tail(tables->all_files, file); }
-    g_mutex_unlock(&tables->lock);
-}
-
 void rm_file_tables_clear(const RmSession *session) {
     GHashTableIter iter;
     gpointer key;

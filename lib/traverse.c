@@ -23,22 +23,10 @@
  *
  */
 
-#include <stdlib.h>
 #include <string.h>
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <errno.h>
-
 #include <glib.h>
 
-#include "preprocess.h"
-#include "formats.h"
-#include "utilities.h"
-#include "file.h"
-#include "xattr.h"
-#include "md-scheduler.h"
-
+#include "traverse.h"
 #include "fts/fts.h"
 
 ///////////////////////////////////////////
@@ -84,33 +72,24 @@ static void rm_trav_buffer_free(RmTravBuffer *self) {
 typedef struct RmTravSession {
     RmUserList *userlist;
     RmCfg *cfg;
+    GThreadPool *file_pool;
     RmFmtTable *formats;
     RmCounters *counters;
-    RmMountTable *mounts;
-    RmFileTables *tables;
 } RmTravSession;
 
-static RmTravSession *rm_traverse_session_new(RmCfg *cfg, RmFmtTable *formats,
-                                              RmCounters *counters, RmMountTable *mounts,
-                                              RmFileTables *tables) {
+static RmTravSession *rm_traverse_session_new(RmCfg *cfg, GThreadPool *file_pool,
+                                              RmFmtTable *formats, RmCounters *counters) {
     RmTravSession *self = g_new0(RmTravSession, 1);
     self->cfg = cfg;
+    self->file_pool = file_pool;
     self->formats = formats;
     self->counters = counters;
-    self->mounts = mounts;
-    self->tables = tables;
     self->userlist = rm_userlist_new();
     return self;
 }
 
 static void rm_traverse_session_free(RmTravSession *traverser) {
-    rm_log_debug_line("Found %d files, ignored %d hidden files and %d hidden folders",
-                      traverser->counters->total_files,
-                      traverser->counters->ignored_files,
-                      traverser->counters->ignored_folders);
-
     rm_userlist_destroy(traverser->userlist);
-
     g_free(traverser);
 }
 
@@ -141,7 +120,7 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
             }
         } else if(cfg->permissions && access(path, cfg->permissions) == -1) {
             /* bad permissions; ignore file */
-            traverser->counters->ignored_files++;
+            g_atomic_int_inc(&traverser->counters->ignored_files);
             return;
         } else if(cfg->find_badids &&
                   (gid_check = rm_util_uid_gid_check(statp, traverser->userlist))) {
@@ -153,13 +132,7 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
             if(!cfg->limits_specified ||
                ((cfg->minsize == (RmOff)-1 || cfg->minsize <= file_size) &&
                 (cfg->maxsize == (RmOff)-1 || file_size <= cfg->maxsize))) {
-                if(rm_mounts_is_evil(traverser->mounts, statp->st_dev) == false) {
-                    file_type = RM_LINT_TYPE_DUPE_CANDIDATE;
-                } else {
-                    /* A file in an evil fs. Ignore. */
-                    traverser->counters->ignored_files++;
-                    return;
-                }
+                file_type = RM_LINT_TYPE_DUPE_CANDIDATE;
             } else {
                 return;
             }
@@ -172,16 +145,7 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
         file->is_symlink = is_symlink;
         file->is_hidden = is_hidden;
         file->is_on_subvol_fs = is_on_subvol_fs;
-
-        rm_file_list_insert_file(file, traverser->tables);
-
-        g_atomic_int_add(&traverser->counters->total_files, 1);
-        rm_fmt_set_state(traverser->formats, RM_PROGRESS_STATE_TRAVERSE);
-
-        if(traverser->cfg->clear_xattr_fields &&
-           file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-            rm_xattr_clear_hash(cfg, file);
-        }
+        g_thread_pool_push(traverser->file_pool, file, NULL);
     }
 }
 
@@ -457,17 +421,14 @@ done:
 // PUBLIC API //
 ////////////////
 
-void rm_traverse_tree(RmCfg *cfg, RmFmtTable *formats, RmCounters *counters,
-                      RmMountTable *mounts, RmMDS *mds, RmFileTables *tables) {
+void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmFmtTable *formats,
+                      RmCounters *counters, RmMDS *mds) {
     rm_assert_gentle(cfg);
     rm_assert_gentle(formats);
     rm_assert_gentle(counters);
-    rm_assert_gentle(mounts);
     rm_assert_gentle(mds);
-    rm_assert_gentle(tables);
 
-    RmTravSession *traverser =
-        rm_traverse_session_new(cfg, formats, counters, mounts, tables);
+    RmTravSession *traverser = rm_traverse_session_new(cfg, file_pool, formats, counters);
 
     rm_mds_configure(
         mds, (RmMDSFunc)rm_traverse_directory, traverser, 0, cfg->threads_per_disk, NULL);

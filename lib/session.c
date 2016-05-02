@@ -207,8 +207,11 @@ int rm_session_run(RmSession *session) {
         rm_util_thread_pool_new((GFunc)rm_session_file_pool, session, 1);
 
     rm_traverse_tree(session->cfg, file_pool, session->mds);
+    rm_log_debug_line("Traversal finished at %.3f",
+                      g_timer_elapsed(session->timer, NULL));
 
     g_thread_pool_free(file_pool, FALSE, TRUE);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
 
     rm_log_debug_line(
         "List build finished at %.3f with %d files; ignored %d hidden files and %d "

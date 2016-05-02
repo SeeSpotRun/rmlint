@@ -45,7 +45,7 @@
 #include "treemerge.h"
 
 /* Enable extra debug messages? */
-#define _RM_SHRED_DEBUG 1
+#define _RM_SHRED_DEBUG 0
 
 /* This is the engine of rmlint for file duplicate matching.
  *

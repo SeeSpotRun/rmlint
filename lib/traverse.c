@@ -409,8 +409,8 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
 
     RmTravSession *traverser = rm_traverse_session_new(cfg, file_pool);
 
-    rm_mds_configure(
-        mds, (RmMDSFunc)rm_traverse_directory, traverser, 0, cfg->threads_per_disk, NULL);
+    rm_mds_configure(mds, (RmMDSFunc)rm_traverse_directory, traverser, 0,
+                     cfg->threads_per_disk, NULL);
 
     for(guint idx = 0; cfg->paths[idx] != NULL && !rm_session_was_aborted(); ++idx) {
         char *path = cfg->paths[idx];

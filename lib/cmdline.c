@@ -233,7 +233,7 @@ static GLogLevelFlags VERBOSITY_TO_LOG_LEVEL[] = {[0] = G_LOG_LEVEL_CRITICAL,
                                                         G_LOG_LEVEL_INFO,
                                                   [4] = G_LOG_LEVEL_DEBUG};
 
-static bool rm_cmd_add_path(RmCfg *cfg, bool is_prefd, int index, const char *path) {
+static bool rm_cmd_add_path(RmCfg *cfg, int index, const char *path) {
     int rc = 0;
 
 #if HAVE_FACCESSAT
@@ -247,8 +247,6 @@ static bool rm_cmd_add_path(RmCfg *cfg, bool is_prefd, int index, const char *pa
                             strerror(errno));
         return FALSE;
     } else {
-        cfg->is_prefd = g_realloc(cfg->is_prefd, sizeof(char) * (index + 1));
-        cfg->is_prefd[index] = is_prefd;
         cfg->paths = g_realloc(cfg->paths, sizeof(char *) * (index + 2));
 
         char *abs_path = NULL;
@@ -264,14 +262,14 @@ static bool rm_cmd_add_path(RmCfg *cfg, bool is_prefd, int index, const char *pa
     }
 }
 
-static int rm_cmd_read_paths_from_stdin(RmCfg *cfg, bool is_prefd, int index) {
+static int rm_cmd_read_paths_from_stdin(RmCfg *cfg, int index) {
     int paths_added = 0;
     char path_buf[PATH_MAX];
     char *tokbuf = NULL;
 
     while(fgets(path_buf, PATH_MAX, stdin)) {
-        paths_added += rm_cmd_add_path(cfg, is_prefd, index + paths_added,
-                                       strtok_r(path_buf, "\n", &tokbuf));
+        paths_added +=
+            rm_cmd_add_path(cfg, index + paths_added, strtok_r(path_buf, "\n", &tokbuf));
     }
 
     return paths_added;
@@ -1129,7 +1127,6 @@ static bool rm_cmd_set_cmdline(RmCfg *cfg, int argc, char **argv) {
 
 static bool rm_cmd_set_paths(RmCfg *cfg, char **paths) {
     int path_index = 0;
-    bool is_prefd = false;
     bool not_all_paths_read = false;
 
     /* Check the directory to be valid */
@@ -1138,11 +1135,15 @@ static bool rm_cmd_set_paths(RmCfg *cfg, char **paths) {
         const char *dir_path = paths[i];
 
         if(strncmp(dir_path, "-", 1) == 0) {
-            read_paths = rm_cmd_read_paths_from_stdin(cfg, is_prefd, path_index);
+            read_paths = rm_cmd_read_paths_from_stdin(cfg, path_index);
         } else if(strncmp(dir_path, "//", 2) == 0 && strlen(dir_path) == 2) {
-            is_prefd = !is_prefd;
+            if(cfg->first_prefd != 0) {
+                rm_log_error_line("More that one // separator detected, ignoring");
+            } else {
+                cfg->first_prefd = path_index;
+            }
         } else {
-            read_paths = rm_cmd_add_path(cfg, is_prefd, path_index, paths[i]);
+            read_paths = rm_cmd_add_path(cfg, path_index, paths[i]);
         }
 
         if(read_paths == 0) {
@@ -1156,7 +1157,7 @@ static bool rm_cmd_set_paths(RmCfg *cfg, char **paths) {
 
     if(path_index == 0 && not_all_paths_read == false) {
         /* Still no path set? - use `pwd` */
-        rm_cmd_add_path(cfg, is_prefd, path_index, cfg->iwd);
+        rm_cmd_add_path(cfg, path_index, cfg->iwd);
     } else if(path_index == 0 && not_all_paths_read) {
         return false;
     }

@@ -293,7 +293,7 @@ static bool rm_parrot_check_path(RmParrot *polly, RmFile *file, const char *file
      * If this turns out to be an performance problem, we could turn cfg->paths
      * into a RmTrie and use it to find the longest prefix easily.
      */
-    for(int i = 0; cfg->paths[i]; ++i) {
+    for(guint i = 0; cfg->paths[i]; ++i) {
         char *path = cfg->paths[i];
         size_t path_len = strlen(path);
 
@@ -301,7 +301,7 @@ static bool rm_parrot_check_path(RmParrot *polly, RmFile *file, const char *file
             if(path_len > highest_match) {
                 highest_match = path_len;
 
-                file->is_prefd = cfg->is_prefd[i];
+                file->is_prefd = (i >= cfg->first_prefd);
                 file->path_index = i;
             }
         }

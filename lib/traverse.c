@@ -412,9 +412,9 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
     rm_mds_configure(
         mds, (RmMDSFunc)rm_traverse_directory, traverser, 0, cfg->threads_per_disk, NULL);
 
-    for(RmOff idx = 0; cfg->paths[idx] != NULL && !rm_session_was_aborted(); ++idx) {
+    for(guint idx = 0; cfg->paths[idx] != NULL && !rm_session_was_aborted(); ++idx) {
         char *path = cfg->paths[idx];
-        bool is_prefd = cfg->is_prefd[idx];
+        bool is_prefd = idx >= cfg->first_prefd;
 
         RmTravBuffer *buffer = rm_trav_buffer_new(cfg, path, is_prefd, idx);
 

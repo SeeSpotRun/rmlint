@@ -72,7 +72,6 @@ void rm_session_clear(RmSession *session) {
     }
 
     g_free(cfg->joined_argv);
-    g_free(cfg->is_prefd);
     g_free(cfg->iwd);
 
     for(GList *iter = session->cfg->replay_files.head; iter; iter = iter->next) {

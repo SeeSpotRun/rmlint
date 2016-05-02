@@ -91,7 +91,6 @@ static int rm_hasher_callback(_UNUSED RmHasher *hasher,
             /* check if the next due digest has been completed; if yes then print
              * it (and possibly any following digests) */
             while(session->completed_digests_buffer[session->path_index]) {
-
                 if(session->paths[session->path_index]) {
                     if(session->read_succesful[session->path_index]) {
                         rm_hasher_print(
@@ -202,7 +201,7 @@ int rm_hasher_main(int argc, const char **argv) {
 
     int buf_size = (g_strv_length(tag.paths) + 1) * sizeof(RmDigest *);
     tag.read_succesful = g_slice_alloc0(buf_size);
-    
+
     if(tag.print_in_order) {
         /* allocate buffer to collect results */
         tag.completed_digests_buffer = g_slice_alloc0(buf_size);
@@ -231,7 +230,7 @@ int rm_hasher_main(int argc, const char **argv) {
             rm_log_warning_line(_("Directories are not supported: %s"), tag.paths[i]);
         } else if(S_ISREG(stat_buf.st_mode)) {
             RmHasherTask *task = rm_hasher_task_new(hasher, NULL, GINT_TO_POINTER(i));
-            tag.read_succesful[i] = 
+            tag.read_succesful[i] =
                 rm_hasher_task_hash(task, tag.paths[i], 0, stat_buf.st_size, FALSE);
 
             rm_hasher_task_finish(task);

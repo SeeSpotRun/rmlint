@@ -46,9 +46,9 @@
 ///////////////////////////////////////////
 
 /* Defines a path variable containing the buffer's path */
-#define RM_BUFFER_DEFINE_PATH(session, buff)                                 \
-    char *buff##_path = NULL;                                                \
-    buff##_path = buff->path;                                                \
+#define RM_BUFFER_DEFINE_PATH(session, buff) \
+    char *buff##_path = NULL;                \
+    buff##_path = buff->path;
 
 typedef struct RmTravBuffer {
     RmStat stat_buf;   /* rm_sys_stat(2) information about the directory */
@@ -115,8 +115,7 @@ static void rm_traverse_session_free(RmTravSession *trav_session) {
 // ACTUAL WORK HERE //
 //////////////////////
 
-static void rm_traverse_file(RmTravSession *trav_session, RmStat *statp,
-                             char *path,
+static void rm_traverse_file(RmTravSession *trav_session, RmStat *statp, char *path,
                              bool is_prefd, unsigned long path_index,
                              RmLintType file_type, bool is_symlink, bool is_hidden,
                              bool is_on_subvol_fs, short depth) {
@@ -166,8 +165,8 @@ static void rm_traverse_file(RmTravSession *trav_session, RmStat *statp,
         }
     }
 
-    RmFile *file = rm_file_new(session, path, statp, file_type, is_prefd,
-                               path_index, depth);
+    RmFile *file =
+        rm_file_new(session, path, statp, file_type, is_prefd, path_index, depth);
 
     if(file != NULL) {
         file->is_symlink = is_symlink;
@@ -198,11 +197,11 @@ static bool rm_traverse_is_hidden(RmCfg *cfg, const char *basename, char *hierar
 }
 
 /* Macro for rm_traverse_directory() for easy file adding */
-#define _ADD_FILE(lint_type, is_symlink, stat_buf)                            \
-    rm_traverse_file(                                                         \
-        trav_session, (RmStat *)stat_buf, p->fts_path,                        \
-        is_prefd, path_index, lint_type, is_symlink,                          \
-        rm_traverse_is_hidden(cfg, p->fts_name, is_hidden, p->fts_level + 1), \
+#define _ADD_FILE(lint_type, is_symlink, stat_buf)                                      \
+    rm_traverse_file(                                                                   \
+        trav_session, (RmStat *)stat_buf, p->fts_path, is_prefd, path_index, lint_type, \
+        is_symlink,                                                                     \
+        rm_traverse_is_hidden(cfg, p->fts_name, is_hidden, p->fts_level + 1),           \
         is_on_subvol_fs, p->fts_level);
 
 #if RM_PLATFORM_32 && HAVE_STAT64
@@ -286,8 +285,7 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *trav_sess
     memset(is_emptydir, 0, sizeof(is_emptydir) - 1);
     memset(is_hidden, 0, sizeof(is_hidden) - 1);
 
-    while(!rm_session_was_aborted() &&
-          (p = fts_read(ftsp)) != NULL) {
+    while(!rm_session_was_aborted() && (p = fts_read(ftsp)) != NULL) {
         /* check for hidden file or folder */
         if(cfg->ignore_hidden && p->fts_level > 0 && p->fts_name[0] == '.') {
             /* ignoring hidden folders*/
@@ -368,9 +366,8 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *trav_sess
                     /* normal stat failed but 64-bit stat worked
                      * -> must be a big file on 32 bit.
                      */
-                    rm_traverse_file(trav_session, &stat_buf, p->fts_path,
-                                     is_prefd, path_index,
-                                     RM_LINT_TYPE_UNKNOWN, false,
+                    rm_traverse_file(trav_session, &stat_buf, p->fts_path, is_prefd,
+                                     path_index, RM_LINT_TYPE_UNKNOWN, false,
                                      rm_traverse_is_hidden(cfg, p->fts_name, is_hidden,
                                                            p->fts_level + 1),
                                      is_on_subvol_fs, p->fts_level);
@@ -475,8 +472,7 @@ void rm_traverse_tree(RmSession *session) {
                      session->cfg->threads_per_disk,
                      NULL);
 
-    for(RmOff idx = 0; cfg->paths[idx] != NULL && !rm_session_was_aborted();
-        ++idx) {
+    for(RmOff idx = 0; cfg->paths[idx] != NULL && !rm_session_was_aborted(); ++idx) {
         char *path = cfg->paths[idx];
         bool is_prefd = cfg->is_prefd[idx];
 
@@ -493,9 +489,8 @@ void rm_traverse_tree(RmSession *session) {
                 is_hidden = rm_util_path_is_hidden(buffer_path);
             }
 
-            rm_traverse_file(trav_session, &buffer->stat_buf, buffer_path,
-                             is_prefd, idx, RM_LINT_TYPE_UNKNOWN,
-                             false, is_hidden, FALSE, 0);
+            rm_traverse_file(trav_session, &buffer->stat_buf, buffer_path, is_prefd, idx,
+                             RM_LINT_TYPE_UNKNOWN, false, is_hidden, FALSE, 0);
 
             rm_trav_buffer_free(buffer);
         } else if(S_ISDIR(buffer->stat_buf.st_mode)) {

@@ -76,7 +76,6 @@ RmBufferPool *rm_buffer_pool_init(gsize buffer_size, gsize max_mem) {
 }
 
 void rm_buffer_pool_destroy(RmBufferPool *pool) {
-
     g_slist_free_full(pool->stack, (GDestroyNotify)rm_buffer_free);
 
     g_mutex_clear(&pool->lock);
@@ -90,10 +89,10 @@ RmBuffer *rm_buffer_get(RmBufferPool *pool) {
     {
         while(!buffer) {
             buffer = rm_util_slist_pop(&pool->stack, NULL);
-            if (!buffer && pool->avail_buffers > 0) {
+            if(!buffer && pool->avail_buffers > 0) {
                 buffer = rm_buffer_new(pool);
             }
-            if (!buffer) {
+            if(!buffer) {
                 if(!pool->mem_warned) {
                     rm_log_warning_line(
                         "read buffer limit reached - waiting for "
@@ -104,7 +103,6 @@ RmBuffer *rm_buffer_get(RmBufferPool *pool) {
             }
         }
         pool->avail_buffers--;
-
     }
     g_mutex_unlock(&pool->lock);
 
@@ -333,8 +331,7 @@ void rm_digest_paranoia_shrink(RmDigest *digest, gsize new_size) {
 
 void rm_digest_release_buffers(RmDigest *digest) {
     if(digest->paranoid && digest->paranoid->buffers) {
-        g_slist_free_full(digest->paranoid->buffers,
-                          (GDestroyNotify)rm_buffer_free);
+        g_slist_free_full(digest->paranoid->buffers, (GDestroyNotify)rm_buffer_free);
         digest->paranoid->buffers = NULL;
     }
 }

@@ -70,7 +70,7 @@ static void signal_handler(int signum) {
         break;
     case SIGSEGV:
         /* logging messages might have unexpected effects in a signal handler,
-         * but that's probably the least thing we have to worry about in case of 
+         * but that's probably the least thing we have to worry about in case of
          * a segmentation fault.
          */
         rm_log_error_line(_("Aborting due to a fatal error. (signal received: %s)"),

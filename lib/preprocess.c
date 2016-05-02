@@ -122,8 +122,7 @@ static guint rm_path_double_hash(const RmPathDoubleKey *key) {
     return rm_node_hash(key->file);
 }
 
-static bool rm_path_have_same_parent(RmPathDoubleKey *key_a,
-                                     RmPathDoubleKey *key_b) {
+static bool rm_path_have_same_parent(RmPathDoubleKey *key_a, RmPathDoubleKey *key_b) {
     RmFile *file_a = key_a->file, *file_b = key_b->file;
     return file_a->folder->parent == file_b->folder->parent;
 }
@@ -378,7 +377,8 @@ int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *s
                 cmp = rm_pp_cmp_by_regex(
                     g_ptr_array_index(session->pattern_cache, regex_cursor), regex_cursor,
                     (RmPatternBitmask *)&a->pattern_bitmask_basename, a->folder->basename,
-                    (RmPatternBitmask *)&b->pattern_bitmask_basename, b->folder->basename);
+                    (RmPatternBitmask *)&b->pattern_bitmask_basename,
+                    b->folder->basename);
                 regex_cursor++;
                 break;
             }
@@ -618,7 +618,8 @@ void rm_preprocess(RmSession *session) {
             g_hash_table_steal_all(node_table);
             if(tables->size_groups->data == NULL) {
                 /* zero size group after handling other lint; remove it */
-                tables->size_groups = g_slist_delete_link(tables->size_groups, tables->size_groups);
+                tables->size_groups =
+                    g_slist_delete_link(tables->size_groups, tables->size_groups);
             }
             current_size_file = file;
         }

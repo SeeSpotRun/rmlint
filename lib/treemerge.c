@@ -492,7 +492,8 @@ RmTreeMerger *rm_tm_new(RmSession *session) {
     return self;
 }
 
-int rm_tm_destroy_iter(_UNUSED RmTrie *self, RmNode *node, _UNUSED int level, _UNUSED RmTreeMerger *tm) {
+int rm_tm_destroy_iter(_UNUSED RmTrie *self, RmNode *node, _UNUSED int level,
+                       _UNUSED RmTreeMerger *tm) {
     RmDirectory *directory = node->data;
     rm_directory_free(directory);
     return 0;
@@ -676,8 +677,8 @@ static void rm_tm_forward_unresolved(RmTreeMerger *self, RmDirectory *directory)
     }
 }
 
-static int rm_tm_iter_unfinished_files(_UNUSED RmTrie *trie, RmNode *node, _UNUSED int level,
-                                       _UNUSED void *user_data) {
+static int rm_tm_iter_unfinished_files(_UNUSED RmTrie *trie, RmNode *node,
+                                       _UNUSED int level, _UNUSED void *user_data) {
     RmTreeMerger *self = user_data;
     rm_tm_forward_unresolved(self, node->data);
     return 0;
@@ -777,7 +778,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
 
         if(result_dirs.length >= 2) {
             rm_shred_forward_to_output(self->session, &file_adaptor_group);
-        } 
+        }
 
         g_queue_clear(&file_adaptor_group);
         g_queue_clear(&result_dirs);
@@ -813,10 +814,9 @@ static void rm_tm_extract(RmTreeMerger *self) {
 
     GQueue *file_list = NULL;
     while(g_hash_table_iter_next(&iter, NULL, (void **)&file_list)) {
-        if (self->session->cfg->partial_hidden) {
+        if(self->session->cfg->partial_hidden) {
             /* with --partial-hidden we do not want to output */
-            rm_util_queue_foreach_remove(file_list,
-                    (RmRFunc)rm_tm_hidden_file, NULL);
+            rm_util_queue_foreach_remove(file_list, (RmRFunc)rm_tm_hidden_file, NULL);
         }
 
         if(file_list->length >= 2) {
@@ -825,7 +825,8 @@ static void rm_tm_extract(RmTreeMerger *self) {
                 self->session->dup_group_counter -= 1;
                 self->session->dup_counter -= file_list->length - 1;
             } else {
-                rm_shred_group_find_original(self->session, file_list, RM_SHRED_GROUP_FINISHING);
+                rm_shred_group_find_original(self->session, file_list,
+                                             RM_SHRED_GROUP_FINISHING);
                 rm_shred_forward_to_output(self->session, file_list);
             }
         }

@@ -65,7 +65,7 @@ void rm_cfg_set_default(RmCfg *cfg) {
     cfg->verbosity = G_LOG_LEVEL_INFO;
     cfg->follow_symlinks = false;
 
-    cfg->total_mem = (RmOff) 1024 * 1024 * 1024;
+    cfg->total_mem = (RmOff)1024 * 1024 * 1024;
     cfg->sweep_size = 1024 * 1024 * 1024;
     cfg->sweep_count = 1024 * 16;
 

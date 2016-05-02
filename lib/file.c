@@ -31,9 +31,8 @@
 #include <sys/file.h>
 #include <string.h>
 
-RmFile *rm_file_new(struct RmSession *session, const char *path,
-                    RmStat *statp, RmLintType type, bool is_ppath, unsigned path_index,
-                    short depth) {
+RmFile *rm_file_new(struct RmSession *session, const char *path, RmStat *statp,
+                    RmLintType type, bool is_ppath, unsigned path_index, short depth) {
     RmCfg *cfg = session->cfg;
     RmOff actual_file_size = statp->st_size;
     RmOff start_seek = 0;

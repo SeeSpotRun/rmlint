@@ -248,19 +248,18 @@ gint rm_util_slist_foreach_remove(GSList **list, RmRFunc func, gpointer user_dat
 
 gpointer rm_util_slist_pop(GSList **list, GMutex *lock) {
     gpointer result = NULL;
-    if (lock) {
+    if(lock) {
         g_mutex_lock(lock);
     }
-    if (*list) {
+    if(*list) {
         result = (*list)->data;
         *list = g_slist_delete_link(*list, *list);
     }
-    if (lock) {
+    if(lock) {
         g_mutex_unlock(lock);
     }
     return result;
 }
-
 
 /* checks uid and gid; returns 0 if both ok, else RM_LINT_TYPE_ corresponding *
  * to RmFile->filter types                                            */
@@ -671,8 +670,9 @@ static RmMountEntries *rm_mount_list_open(RmMountTable *table) {
     return self;
 }
 
-int rm_mounts_devno_to_wholedisk(_UNUSED RmMountEntry *entry, _UNUSED dev_t rdev, _UNUSED char *disk,
-                                 _UNUSED size_t disk_size, _UNUSED dev_t *result) {
+int rm_mounts_devno_to_wholedisk(_UNUSED RmMountEntry *entry, _UNUSED dev_t rdev,
+                                 _UNUSED char *disk, _UNUSED size_t disk_size,
+                                 _UNUSED dev_t *result) {
     return blkid_devno_to_wholedisk(rdev, disk, disk_size, result);
 }
 
@@ -853,7 +853,8 @@ bool rm_mounts_is_nonrotational(RmMountTable *self, dev_t device) {
     }
 }
 
-dev_t rm_mounts_get_disk_id(RmMountTable *self, _UNUSED dev_t dev, _UNUSED const char *path) {
+dev_t rm_mounts_get_disk_id(RmMountTable *self, _UNUSED dev_t dev,
+                            _UNUSED const char *path) {
     if(self == NULL) {
         return 0;
     }
@@ -1101,7 +1102,8 @@ bool rm_offsets_match(char *path1, char *path2) {
 
 #else /* Probably FreeBSD */
 
-RmOff rm_offset_get_from_fd(_UNUSED int fd, _UNUSED RmOff file_offset, _UNUSED RmOff *file_offset_next) {
+RmOff rm_offset_get_from_fd(_UNUSED int fd, _UNUSED RmOff file_offset,
+                            _UNUSED RmOff *file_offset_next) {
     return 0;
 }
 

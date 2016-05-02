@@ -47,7 +47,7 @@ static RmFmtGroup *rm_fmt_group_new(void) {
 
 static void rm_fmt_group_destroy(RmFmtTable *self, RmFmtGroup *group) {
     RmCfg *cfg = self->session->cfg;
-    
+
     /* Special case: treemerge.c has to manage memory itself,
      *               since it omits some files or may even print them twice.
      */

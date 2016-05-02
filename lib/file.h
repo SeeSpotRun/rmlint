@@ -247,10 +247,10 @@ typedef struct RmFile {
 } RmFile;
 
 /* Defines a path variable containing the file's path */
-#define RM_DEFINE_PATH_IF_NEEDED(file, needed)            \
-    char file##_path[PATH_MAX];                           \
-    if(needed) {                                          \
-        rm_file_build_path((RmFile *)file, file##_path);  \
+#define RM_DEFINE_PATH_IF_NEEDED(file, needed)           \
+    char file##_path[PATH_MAX];                          \
+    if(needed) {                                         \
+        rm_file_build_path((RmFile *)file, file##_path); \
     }
 
 /* Fill path always */
@@ -262,9 +262,8 @@ typedef struct RmFile {
 /**
  * @brief Create a new RmFile handle.
  */
-RmFile *rm_file_new(struct RmSession *session, const char *path,
-                    RmStat *statp, RmLintType type, bool is_ppath, unsigned pnum,
-                    short depth);
+RmFile *rm_file_new(struct RmSession *session, const char *path, RmStat *statp,
+                    RmLintType type, bool is_ppath, unsigned pnum, short depth);
 
 /**
  * @brief Deallocate the memory allocated by rm_file_new.

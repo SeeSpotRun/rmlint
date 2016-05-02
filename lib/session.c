@@ -134,23 +134,41 @@ static int rm_session_replay(RmSession *session) {
 
 /* threadpool to receive files from traverser.
  * single threaded; assumes safe access to tables->all_files
- * and counters->total_files.
+ * and session->counters.
  */
 static void rm_session_file_pool(RmFile *file, RmSession *session) {
-    if(rm_mounts_is_evil(session->mounts, file->dev)) {
-        /* A file in an evil fs. Ignore.
-         * Counter is also accessed by traverse.c (TODO!) so need
-         * to increment atomically */
-        g_atomic_int_inc(&session->counters->ignored_files);
+    RM_DEFINE_PATH(file);
+
+    if(rm_mounts_is_evil(session->mounts, file->dev)
+       /* A file in an evil fs. Ignore. */
+       ||
+       rm_fmt_is_a_output(session->formats, file_path)
+       /* ignore files which are rmlint outputs */
+       ||
+       (file->lint_type == RM_LINT_TYPE_EMPTY_FILE && !session->cfg->find_emptyfiles)
+       /* ignoring empty files */
+       ||
+       file->lint_type == RM_LINT_TYPE_BADPERM ||
+       file->lint_type == RM_LINT_TYPE_WRONG_SIZE ||
+       file->lint_type == RM_LINT_TYPE_HIDDEN_FILE) {
+        session->counters->ignored_files++;
+        rm_file_destroy(file);
         return;
     }
+
+    if(file->lint_type == RM_LINT_TYPE_HIDDEN_DIR) {
+        session->counters->ignored_folders++;
+        rm_file_destroy(file);
+        return;
+    }
+
     if(session->cfg->clear_xattr_fields &&
        file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         rm_xattr_clear_hash(session->cfg, file);
     }
     g_queue_push_tail(session->tables->all_files, file);
 
-    if(session->counters->total_files++ % 100 == 0) {
+    if(++session->counters->total_files % 100 == 0) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
     }
 }
@@ -189,8 +207,7 @@ int rm_session_run(RmSession *session) {
     GThreadPool *file_pool =
         rm_util_thread_pool_new((GFunc)rm_session_file_pool, session, 1);
 
-    rm_traverse_tree(session->cfg, file_pool, session->formats, session->counters,
-                     session->mds);
+    rm_traverse_tree(session->cfg, file_pool, session->mds);
 
     g_thread_pool_free(file_pool, FALSE, TRUE);
 

@@ -73,17 +73,12 @@ typedef struct RmTravSession {
     RmUserList *userlist;
     RmCfg *cfg;
     GThreadPool *file_pool;
-    RmFmtTable *formats;
-    RmCounters *counters;
 } RmTravSession;
 
-static RmTravSession *rm_traverse_session_new(RmCfg *cfg, GThreadPool *file_pool,
-                                              RmFmtTable *formats, RmCounters *counters) {
+static RmTravSession *rm_traverse_session_new(RmCfg *cfg, GThreadPool *file_pool) {
     RmTravSession *self = g_new0(RmTravSession, 1);
     self->cfg = cfg;
     self->file_pool = file_pool;
-    self->formats = formats;
-    self->counters = counters;
     self->userlist = rm_userlist_new();
     return self;
 }
@@ -103,25 +98,15 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
                              bool is_on_subvol_fs, short depth) {
     RmCfg *cfg = traverser->cfg;
 
-    if(rm_fmt_is_a_output(traverser->formats, path)) {
-        /* ignore files which are rmlint outputs */
-        return;
-    }
-
     /* Try to autodetect the type of the lint */
     if(file_type == RM_LINT_TYPE_UNKNOWN) {
         RmLintType gid_check;
         /* see if we can find a lint type */
         if(statp->st_size == 0) {
-            if(!cfg->find_emptyfiles) {
-                return;
-            } else {
-                file_type = RM_LINT_TYPE_EMPTY_FILE;
-            }
+            file_type = RM_LINT_TYPE_EMPTY_FILE;
         } else if(cfg->permissions && access(path, cfg->permissions) == -1) {
             /* bad permissions; ignore file */
-            g_atomic_int_inc(&traverser->counters->ignored_files);
-            return;
+            file_type = RM_LINT_TYPE_BADPERM;
         } else if(cfg->find_badids &&
                   (gid_check = rm_util_uid_gid_check(statp, traverser->userlist))) {
             file_type = gid_check;
@@ -134,7 +119,7 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
                 (cfg->maxsize == (RmOff)-1 || file_size <= cfg->maxsize))) {
                 file_type = RM_LINT_TYPE_DUPE_CANDIDATE;
             } else {
-                return;
+                file_type = RM_LINT_TYPE_WRONG_SIZE;
             }
         }
     }
@@ -253,9 +238,9 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser
 
             if(p->fts_info == FTS_D) {
                 fts_set(ftsp, p, FTS_SKIP); /* do not recurse */
-                g_atomic_int_inc(&traverser->counters->ignored_folders);
+                ADD_FILE(RM_LINT_TYPE_HIDDEN_DIR, false);
             } else {
-                g_atomic_int_inc(&traverser->counters->ignored_files);
+                ADD_FILE(RM_LINT_TYPE_HIDDEN_FILE, false);
             }
 
             clear_emptydir_flags = true; /* flag current dir as not empty */
@@ -409,9 +394,6 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser
 
     fts_close(ftsp);
 
-    // rm_file_list_insert_queue(, session);
-    rm_fmt_set_state(traverser->formats, RM_PROGRESS_STATE_TRAVERSE);
-
 done:
     rm_mds_device_ref(buffer->disk, -1);
     rm_trav_buffer_free(buffer);
@@ -421,14 +403,11 @@ done:
 // PUBLIC API //
 ////////////////
 
-void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmFmtTable *formats,
-                      RmCounters *counters, RmMDS *mds) {
+void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
     rm_assert_gentle(cfg);
-    rm_assert_gentle(formats);
-    rm_assert_gentle(counters);
     rm_assert_gentle(mds);
 
-    RmTravSession *traverser = rm_traverse_session_new(cfg, file_pool, formats, counters);
+    RmTravSession *traverser = rm_traverse_session_new(cfg, file_pool);
 
     rm_mds_configure(
         mds, (RmMDSFunc)rm_traverse_directory, traverser, 0, cfg->threads_per_disk, NULL);
@@ -470,6 +449,4 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmFmtTable *formats,
     rm_mds_finish(mds);
 
     rm_traverse_session_free(traverser);
-
-    rm_fmt_set_state(formats, RM_PROGRESS_STATE_TRAVERSE_DONE);
 }

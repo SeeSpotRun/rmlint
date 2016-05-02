@@ -56,6 +56,11 @@ typedef enum RmLintType {
     RM_LINT_TYPE_BADUID,
     RM_LINT_TYPE_BADGID,
     RM_LINT_TYPE_BADUGID,
+    /* dummy types ignored by traverser (used for counting) */
+    RM_LINT_TYPE_BADPERM,
+    RM_LINT_TYPE_WRONG_SIZE,
+    RM_LINT_TYPE_HIDDEN_DIR,
+    RM_LINT_TYPE_HIDDEN_FILE,
 
     /* note: this needs to be after all non-duplicate lint type item in list */
     RM_LINT_TYPE_DUPE_CANDIDATE,

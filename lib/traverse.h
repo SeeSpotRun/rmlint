@@ -34,7 +34,6 @@
  * @param cfg the session configuration
  * @param
  */
-void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmFmtTable *formats,
-                      RmCounters *counters, RmMDS *mds);
+void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds);
 
 #endif

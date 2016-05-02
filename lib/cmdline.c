@@ -1316,8 +1316,7 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
     }
 
     if(!rm_cmd_set_cmdline(cfg, argc, argv)) {
-        g_set_error(&error, RM_ERROR_QUARK, 0, _("Cannot join commandline"));
-        goto failure;
+        rm_log_error_line(_("Cannot join commandline"));
     }
 
     ////////////////////

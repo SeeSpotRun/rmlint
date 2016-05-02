@@ -438,4 +438,14 @@ GThreadPool *rm_util_thread_pool_new(GFunc func, gpointer data, int threads);
  */
 bool rm_util_thread_pool_push(GThreadPool *pool, gpointer data);
 
+/**
+ * @brief Check the kernel version of the Linux kernel.
+ *
+ * @param major The major version it should have at least.
+ * @param minor The minor version it should have at least.
+ *
+ * @return True if the kernel is recent enough.
+ */
+bool rm_util_check_kernel_version(int major, int minor);
+
 #endif /* RM_UTILITIES_H_INCLUDE*/

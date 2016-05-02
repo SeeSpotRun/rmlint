@@ -77,27 +77,8 @@ void rm_cfg_set_default(RmCfg *cfg) {
     cfg->skip_start_offset = 0;
     cfg->skip_end_offset = 0;
 
-    cfg->verbosity_count = 2;
-    cfg->paranoia_count = 0;
-    cfg->output_cnt[0] = -1;
-    cfg->output_cnt[1] = -1;
-
     rm_trie_init(&cfg->file_trie);
-}
+    g_queue_init(&cfg->replay_files);
 
-bool rm_cfg_check_kernel_version(RmCfg *cfg, int major, int minor) {
-    int found_major = cfg->kernel_version[0];
-    int found_minor = cfg->kernel_version[1];
-
-    /* Could not read kernel version: Assume failure on our side. */
-    if(found_major <= 0 && found_minor <= 0) {
-        return true;
-    }
-
-    /* Lower is bad. */
-    if(found_major < major || found_minor < minor) {
-        return false;
-    }
-
-    return true;
+    cfg->pattern_cache = g_ptr_array_new_full(0, (GDestroyNotify)g_regex_unref);
 }

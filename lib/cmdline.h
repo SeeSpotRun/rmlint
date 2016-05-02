@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 #include "cfg.h"
+#include "formats.h"
 
 /**
  * @brief Parse all arguments specified in argc/argv and set the apropriate
@@ -35,6 +36,6 @@
  *
  * @return false on parse error (running makes no sense then)
  */
-bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg);
+bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats);
 
 #endif

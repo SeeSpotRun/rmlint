@@ -48,9 +48,9 @@ static void rm_fmt_prog(RmSession *session,
         return;
     }
 
-    if(session->total_files <= 1) {
-        ARROW fprintf(out, "%s%d%s", MAYBE_RED(out, session), session->total_files,
-                      MAYBE_RESET(out, session));
+    if(session->counters->total_files <= 1) {
+        ARROW fprintf(out, "%s%d%s", MAYBE_RED(out, session),
+                      session->counters->total_files, MAYBE_RESET(out, session));
         fprintf(out, _(" file(s) after investigation, nothing to search through.\n"));
         return;
     }
@@ -69,8 +69,8 @@ static void rm_fmt_prog(RmSession *session,
         ARROW fprintf(out, _("Early shutdown, probably not all lint was found.\n"));
     }
 
-    if(rm_fmt_has_formatter(session->cfg->formats, "pretty") &&
-       rm_fmt_has_formatter(session->cfg->formats, "sh")) {
+    if(rm_fmt_has_formatter(session->formats, "pretty") &&
+       rm_fmt_has_formatter(session->formats, "sh")) {
         ARROW fprintf(out, _("Note: Please use the saved script below for removal, not "
                              "the above output."));
         fprintf(out, "\n");
@@ -78,26 +78,26 @@ static void rm_fmt_prog(RmSession *session,
 
     char numbers[3][512];
     snprintf(numbers[0], sizeof(numbers[0]), "%s%d%s", MAYBE_RED(out, session),
-             session->total_files, MAYBE_RESET(out, session));
+             session->counters->total_files, MAYBE_RESET(out, session));
     snprintf(numbers[1], sizeof(numbers[1]), "%s%" LLU "%s", MAYBE_RED(out, session),
-             session->dup_counter, MAYBE_RESET(out, session));
+             session->counters->dup_counter, MAYBE_RESET(out, session));
     snprintf(numbers[2], sizeof(numbers[2]), "%s%" LLU "%s", MAYBE_RED(out, session),
-             session->dup_group_counter, MAYBE_RESET(out, session));
+             session->counters->dup_group_counter, MAYBE_RESET(out, session));
 
     ARROW fprintf(out, _("In total %s files, whereof %s are duplicates in %s groups.\n"),
                   numbers[0], numbers[1], numbers[2]);
 
     /* log10(2 ** 64) + 2 = 21; */
     char size_string_buf[22] = {0};
-    rm_util_size_to_human_readable(session->total_lint_size, size_string_buf,
+    rm_util_size_to_human_readable(session->counters->total_lint_size, size_string_buf,
                                    sizeof(size_string_buf));
 
     ARROW fprintf(out, _("This equals %s%s%s of duplicates which could be removed.\n"),
                   MAYBE_RED(out, session), size_string_buf, MAYBE_RESET(out, session));
 
-    if(session->other_lint_cnt > 0) {
+    if(session->counters->other_lint_cnt > 0) {
         ARROW fprintf(out, "%s%" LLU "%s ", MAYBE_RED(out, session),
-                      session->other_lint_cnt, MAYBE_RESET(out, session));
+                      session->counters->other_lint_cnt, MAYBE_RESET(out, session));
 
         fprintf(out, _("other suspicious item(s) found, which may vary in size.\n"));
     }
@@ -106,7 +106,7 @@ static void rm_fmt_prog(RmSession *session,
     GHashTableIter iter;
     char *path = NULL;
     RmFmtHandler *handler = NULL;
-    rm_fmt_get_pair_iter(session->cfg->formats, &iter);
+    rm_fmt_get_pair_iter(session->formats, &iter);
 
     while(g_hash_table_iter_next(&iter, (gpointer *)&path, (gpointer *)&handler)) {
         static const char *forbidden[] = {"stdout", "stderr", "stdin"};

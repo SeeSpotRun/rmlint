@@ -67,7 +67,7 @@ static gint rm_file_cmp_without_extension(const RmFile *file_a, const RmFile *fi
 gint rm_file_cmp(const RmFile *file_a, const RmFile *file_b) {
     gint result = SIGN_DIFF(file_a->file_size, file_b->file_size);
 
-    RmCfg *cfg = file_a->session->cfg;
+    const RmCfg *const cfg = file_a->cfg;
 
     if(result == 0) {
         result = (cfg->match_basename) ? rm_file_basenames_cmp(file_a, file_b) : 0;
@@ -293,10 +293,10 @@ int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *s
     }
 }
 
-void rm_file_list_insert_file(RmFile *file, const RmSession *session) {
-    g_mutex_lock(&session->tables->lock);
-    { g_queue_push_tail(session->tables->all_files, file); }
-    g_mutex_unlock(&session->tables->lock);
+void rm_file_list_insert_file(RmFile *file, RmFileTables *tables) {
+    g_mutex_lock(&tables->lock);
+    { g_queue_push_tail(tables->all_files, file); }
+    g_mutex_unlock(&tables->lock);
 }
 
 void rm_file_tables_clear(const RmSession *session) {
@@ -380,7 +380,7 @@ static gboolean rm_pp_handle_inode_clusters(_UNUSED gpointer key, GQueue *inode_
         /* there is a cluster of inode matches */
 
         /* remove path doubles */
-        session->total_filtered_files -=
+        session->counters->total_filtered_files -=
             rm_util_queue_foreach_remove(inode_cluster, (RmRFunc)rm_pp_check_path_double,
                                          session->tables->unique_paths_table);
         /* clear the hashtable ready for the next cluster */
@@ -388,7 +388,7 @@ static gboolean rm_pp_handle_inode_clusters(_UNUSED gpointer key, GQueue *inode_
     }
 
     /* process and remove other lint */
-    session->total_filtered_files -= rm_util_queue_foreach_remove(
+    session->counters->total_filtered_files -= rm_util_queue_foreach_remove(
         inode_cluster, (RmRFunc)rm_pp_handle_other_lint, (RmSession *)session);
 
     if(inode_cluster->length > 1) {
@@ -405,12 +405,12 @@ static gboolean rm_pp_handle_inode_clusters(_UNUSED gpointer key, GQueue *inode_
          * no effort eaither way); rm_pp_handle_hardlink will either free or bundle
          * the hardlinks depending on value of headfile->hardlinks.is_head.
          */
-        session->total_filtered_files -= rm_util_queue_foreach_remove(
+        session->counters->total_filtered_files -= rm_util_queue_foreach_remove(
             inode_cluster, (RmRFunc)rm_pp_handle_hardlink, headfile);
     }
 
     /* update counters */
-    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PREPROCESS);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
 
     rm_assert_gentle(inode_cluster->length <= 1);
     if(inode_cluster->length == 1) {
@@ -446,7 +446,7 @@ static RmOff rm_pp_handler_other_lint(const RmSession *session) {
 
             num_handled++;
 
-            rm_fmt_write(file, session->cfg->formats, -1);
+            rm_fmt_write(file, session->formats, -1);
         }
 
         if(!session->cfg->cache_file_structs) {
@@ -473,13 +473,13 @@ void rm_preprocess(RmSession *session) {
     RmFileTables *tables = session->tables;
     GQueue *all_files = tables->all_files;
 
-    session->total_filtered_files = session->total_files;
+    session->counters->total_filtered_files = session->counters->total_files;
 
     /* initial sort by size */
     g_queue_sort(all_files, (GCompareDataFunc)rm_file_cmp_full, session);
     rm_log_debug_line("initial size sort finished at time %.3f; sorted %d files",
                       g_timer_elapsed(session->timer, NULL),
-                      session->total_files);
+                      session->counters->total_files);
 
     /* split into file size groups; for each size, remove path doubles and bundle
      * hardlinks */
@@ -518,12 +518,12 @@ void rm_preprocess(RmSession *session) {
         }
     }
 
-    session->other_lint_cnt += rm_pp_handler_other_lint(session);
+    session->counters->other_lint_cnt += rm_pp_handler_other_lint(session);
 
     rm_log_debug_line(
         "path doubles removal/hardlink bundling/other lint finished at %.3f; removed %u "
         "of %d",
-        g_timer_elapsed(session->timer, NULL), removed, session->total_files);
+        g_timer_elapsed(session->timer, NULL), removed, session->counters->total_files);
 
-    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PREPROCESS);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS_DONE);
 }

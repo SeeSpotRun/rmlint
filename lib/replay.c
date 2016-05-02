@@ -173,7 +173,7 @@ static RmFile *rm_parrot_try_next(RmParrot *polly) {
     }
 
     /* Fill up the RmFile */
-    file = rm_file_new(polly->session, path, stat_info, type, 0, 0, 0);
+    file = rm_file_new(polly->session->cfg, path, stat_info, type, 0, 0, 0);
     file->is_original = json_object_get_boolean_member(object, "is_original");
     file->is_symlink = (lstat_buf.st_mode & S_IFLNK);
     file->digest = rm_digest_new(RM_DIGEST_EXT, 0, 0, 0, FALSE);
@@ -390,18 +390,18 @@ static void rm_parrot_fix_must_match_tagged(RmParrotCage *cage, GQueue *group) {
 static void rm_parrot_update_stats(RmParrotCage *cage, RmFile *file) {
     RmSession *session = cage->session;
 
-    session->total_files += 1;
+    session->counters->total_files += 1;
     if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-        session->dup_group_counter += file->is_original;
+        session->counters->dup_group_counter += file->is_original;
         if(!file->is_original) {
-            session->dup_counter += 1;
+            session->counters->dup_counter += 1;
 
             if(!RM_IS_BUNDLED_HARDLINK(file)) {
-                session->total_lint_size += file->file_size;
+                session->counters->total_lint_size += file->file_size;
             }
         }
     } else {
-        session->other_lint_cnt += 1;
+        session->counters->other_lint_cnt += 1;
     }
 }
 
@@ -444,7 +444,7 @@ static void rm_parrot_write_group(RmParrotCage *cage, GQueue *group) {
         }
 
         rm_parrot_update_stats(cage, file);
-        rm_fmt_write(file, cage->session->cfg->formats, group->length);
+        rm_fmt_write(file, cage->session->formats, group->length);
     }
 }
 

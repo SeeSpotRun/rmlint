@@ -1169,3 +1169,30 @@ bool rm_iso8601_format(time_t stamp, char *buf, gsize buf_size) {
 
     return false;
 }
+
+//////////////////////////////
+//  kernel version          //
+//////////////////////////////
+
+#if HAVE_UNAME
+#include "sys/utsname.h"
+bool rm_util_check_kernel_version(int major, int minor) {
+    struct utsname buf;
+    if(uname(&buf) == -1) {
+        return false;
+    }
+
+    int have_major = 0;
+    int have_minor = 0;
+    if(sscanf(buf.release, "%d.%d.*", &have_major, &have_minor) == EOF) {
+        return false;
+    }
+
+    rm_log_debug_line("Linux kernel version is %d.%d.", have_major, have_minor);
+    return (have_major > major || (have_major == major && have_minor >= minor));
+}
+#else
+bool rm_util_check_kernel_version(_UNUSED int major, _UNUSED int minor) {
+    return false;
+}
+#endif

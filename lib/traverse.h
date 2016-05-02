@@ -27,10 +27,14 @@
 #define RM_TRAVERSE_H
 
 #include "session.h"
+#include "md-scheduler.h"
 
 /**
  * @brief Traverse all specified paths.
+ * @param cfg the session configuration
+ * @param
  */
-void rm_traverse_tree(RmSession *session);
+void rm_traverse_tree(RmCfg *cfg, RmFmtTable *formats, RmCounters *counters,
+                      RmMountTable *mounts, RmMDS *mds, RmFileTables *tables);
 
 #endif

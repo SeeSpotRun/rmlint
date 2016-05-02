@@ -31,8 +31,8 @@
 #include <stdbool.h>
 #include <glib.h>
 
-/* Needed for RmTreeMerger */
-#include "treemerge.h"
+#include "cfg.h"
+#include "file.h"
 
 typedef struct RmFileTables {
     /* List of all files found during traversal */
@@ -54,7 +54,33 @@ typedef struct RmFileTables {
     GMutex lock;
 } RmFileTables;
 
+typedef struct RmCounters {
+    /* Counters for printing useful statistics */
+    volatile gint total_files;
+    volatile gint ignored_files;
+    volatile gint ignored_folders;
+
+    RmOff total_filtered_files;
+    RmOff total_lint_size;
+    RmOff shred_bytes_remaining;
+    RmOff shred_bytes_total;
+    RmOff shred_files_remaining;
+    RmOff shred_bytes_after_preprocess;
+    RmOff dup_counter;
+    RmOff dup_group_counter;
+    RmOff other_lint_cnt;
+    /* Debugging counters */
+    RmOff offset_fragments;
+    RmOff offsets_read;
+    RmOff offset_fails;
+
+} RmCounters;
+
 typedef struct RmSession {
+    /* stores output formatter config based on command line input */
+    struct RmFmtTable *formats;
+
+    /* stores all other configuration data based on command line input */
     RmCfg *cfg;
 
     /* Stores for RmFile during traversal, preproces and shredder */
@@ -72,31 +98,13 @@ typedef struct RmSession {
     /* Disk Scheduler */
     struct _RmMDS *mds;
 
-    /* Counters for printing useful statistics */
-    volatile gint total_files;
-    volatile gint ignored_files;
-    volatile gint ignored_folders;
-
-    RmOff total_filtered_files;
-    RmOff total_lint_size;
-    RmOff shred_bytes_remaining;
-    RmOff shred_bytes_total;
-    RmOff shred_files_remaining;
-    RmOff shred_bytes_after_preprocess;
-    RmOff dup_counter;
-    RmOff dup_group_counter;
-    RmOff other_lint_cnt;
+    RmCounters *counters;
 
     /* flag indicating if rmlint was aborted early */
     volatile gint aborted;
 
     /* timer used for debugging and profiling messages */
     GTimer *timer;
-
-    /* Debugging counters */
-    RmOff offset_fragments;
-    RmOff offsets_read;
-    RmOff offset_fails;
 
     /* true once shredder finished running */
     bool shredder_finished;
@@ -107,9 +115,9 @@ typedef struct RmSession {
 } RmSession;
 
 /**
- * @brief Initialize session according to cfg.
+ * @brief Initialize session.
  */
-void rm_session_init(RmSession *session, RmCfg *cfg);
+void rm_session_init(RmSession *session);
 
 /**
  * @brief Run the rmlint session.

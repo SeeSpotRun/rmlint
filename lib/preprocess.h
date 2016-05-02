@@ -53,7 +53,7 @@ void rm_file_tables_destroy(RmFileTables *list);
  * @param file The file to insert; ownership is taken.
  */
 
-void rm_file_list_insert_file(RmFile *file, const RmSession *session);
+void rm_file_list_insert_file(RmFile *file, RmFileTables *tables);
 
 /**
  * @brief Clear potential leftover files when shredder was not used.

@@ -59,16 +59,16 @@ typedef struct RmFmtHandlerProgress {
 
 static void rm_fmt_progress_format_preprocess(RmSession *session, char *buf,
                                               size_t buf_len, FILE *out) {
-    if(session->offsets_read > 0) {
+    if(session->counters->offsets_read > 0) {
         g_snprintf(buf, buf_len, "fiemap: %s+%" LLU "%s %s-%" LLU "%s %s#%" LLU "%s",
-                   MAYBE_GREEN(out, session), session->offsets_read,
+                   MAYBE_GREEN(out, session), session->counters->offsets_read,
                    MAYBE_RESET(out, session), MAYBE_RED(out, session),
-                   session->offset_fails, MAYBE_RESET(out, session),
-                   MAYBE_BLUE(out, session), session->total_filtered_files,
+                   session->counters->offset_fails, MAYBE_RESET(out, session),
+                   MAYBE_BLUE(out, session), session->counters->total_filtered_files,
                    MAYBE_RESET(out, session));
     } else {
         g_snprintf(buf, buf_len, "%s %s%" LLU "%s", _("reduces files to"),
-                   MAYBE_GREEN(out, session), session->total_filtered_files,
+                   MAYBE_GREEN(out, session), session->counters->total_filtered_files,
                    MAYBE_RESET(out, session));
     }
 }
@@ -89,34 +89,36 @@ static void rm_fmt_progress_format_text(RmSession *session, RmFmtHandlerProgress
         self->percent = 2.0;
         self->text_len = g_snprintf(
             self->text_buf, sizeof(self->text_buf), "%s (%s%d%s %s / %s%d%s + %s%d%s %s)",
-            _("Traversing"), MAYBE_GREEN(out, session), session->total_files,
+            _("Traversing"), MAYBE_GREEN(out, session), session->counters->total_files,
             MAYBE_RESET(out, session), _("usable files"), MAYBE_RED(out, session),
-            session->ignored_files, MAYBE_RESET(out, session), MAYBE_RED(out, session),
-            session->ignored_folders, MAYBE_RESET(out, session),
-            _("ignored files / folders"));
+            session->counters->ignored_files, MAYBE_RESET(out, session),
+            MAYBE_RED(out, session), session->counters->ignored_folders,
+            MAYBE_RESET(out, session), _("ignored files / folders"));
         break;
     case RM_PROGRESS_STATE_PREPROCESS:
         self->percent = 2.0;
         rm_fmt_progress_format_preprocess(session, preproc_buf, sizeof(preproc_buf), out);
-        self->text_len = g_snprintf(
-            self->text_buf, sizeof(self->text_buf), "%s (%s / %s %s%" LLU "%s %s)",
-            _("Preprocessing"), preproc_buf, _("found"), MAYBE_RED(out, session),
-            session->other_lint_cnt, MAYBE_RESET(out, session), _("other lint"));
+        self->text_len = g_snprintf(self->text_buf, sizeof(self->text_buf),
+                                    "%s (%s / %s %s%" LLU "%s %s)", _("Preprocessing"),
+                                    preproc_buf, _("found"), MAYBE_RED(out, session),
+                                    session->counters->other_lint_cnt,
+                                    MAYBE_RESET(out, session), _("other lint"));
         break;
     case RM_PROGRESS_STATE_SHREDDER:
-        self->percent = 1.0 - ((gdouble)session->shred_bytes_remaining /
-                               (gdouble)session->shred_bytes_after_preprocess);
-        rm_util_size_to_human_readable(session->shred_bytes_remaining, num_buf,
+        self->percent = 1.0 - ((gdouble)session->counters->shred_bytes_remaining /
+                               (gdouble)session->counters->shred_bytes_after_preprocess);
+        rm_util_size_to_human_readable(session->counters->shred_bytes_remaining, num_buf,
                                        sizeof(num_buf));
         self->text_len = g_snprintf(
             self->text_buf, sizeof(self->text_buf),
             "%s (%s%" LLU "%s %s %s%" LLU "%s %s; %s%s%s %s %s%" LLU "%s %s)",
-            _("Matching"), MAYBE_RED(out, session), session->dup_counter,
+            _("Matching"), MAYBE_RED(out, session), session->counters->dup_counter,
             MAYBE_RESET(out, session), _("dupes of"), MAYBE_YELLOW(out, session),
-            session->dup_group_counter, MAYBE_RESET(out, session), _("originals"),
-            MAYBE_GREEN(out, session), num_buf, MAYBE_RESET(out, session),
-            _("to scan in"), MAYBE_GREEN(out, session), session->shred_files_remaining,
-            MAYBE_RESET(out, session), _("files"));
+            session->counters->dup_group_counter, MAYBE_RESET(out, session),
+            _("originals"), MAYBE_GREEN(out, session), num_buf, MAYBE_RESET(out, session),
+            _("to scan in"), MAYBE_GREEN(out, session),
+            session->counters->shred_files_remaining, MAYBE_RESET(out, session),
+            _("files"));
         break;
     case RM_PROGRESS_STATE_MERGE:
         self->percent = 1.0;
@@ -303,18 +305,16 @@ static void rm_fmt_prog(RmSession *session,
 
     if(state == RM_PROGRESS_STATE_INIT) {
         /* Do initializiation here */
-        const char *update_interval_str = rm_fmt_get_config_value(
-            session->cfg->formats, "progressbar", "update_interval");
+        const char *update_interval_str =
+            rm_fmt_get_config_value(session->formats, "progressbar", "update_interval");
 
         self->plain = true;
-        if(rm_fmt_get_config_value(session->cfg->formats, "progressbar", "fancy") !=
-           NULL) {
+        if(rm_fmt_get_config_value(session->formats, "progressbar", "fancy") != NULL) {
             self->plain = false;
         }
 
         self->use_unicode_glyphs = true;
-        if(rm_fmt_get_config_value(session->cfg->formats, "progressbar", "ascii") !=
-           NULL) {
+        if(rm_fmt_get_config_value(session->formats, "progressbar", "ascii") != NULL) {
             self->use_unicode_glyphs = false;
         }
 

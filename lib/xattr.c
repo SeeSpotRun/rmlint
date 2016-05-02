@@ -79,17 +79,17 @@ int rm_sys_removexattr(const char *path, const char *name) {
 
 #endif
 
-static int rm_xattr_build_key(RmSession *session,
+static int rm_xattr_build_key(RmCfg *cfg,
                               const char *suffix,
                               char *buf,
                               size_t buf_size) {
-    rm_assert_gentle(session);
+    rm_assert_gentle(cfg);
 
     /* Be safe, assume caller is not concentrated. */
     memset(buf, 0, sizeof(buf_size));
 
-    const char *digest_name = rm_digest_type_to_string(session->cfg->checksum_type);
-    if(session->cfg->checksum_type == RM_DIGEST_PARANOID) {
+    const char *digest_name = rm_digest_type_to_string(cfg->checksum_type);
+    if(cfg->checksum_type == RM_DIGEST_PARANOID) {
         digest_name = rm_digest_type_to_string(RM_DEFAULT_DIGEST);
     }
 
@@ -154,13 +154,13 @@ static int rm_xattr_del(RmFile *file, const char *key) {
 //  ACTUAL API FUNCTIONS  //
 ////////////////////////////
 
-int rm_xattr_write_hash(RmSession *session, RmFile *file) {
+int rm_xattr_write_hash(RmCfg *cfg, RmFile *file) {
     rm_assert_gentle(file);
     rm_assert_gentle(file->digest);
-    rm_assert_gentle(session);
+    rm_assert_gentle(cfg);
 
 #if HAVE_XATTR
-    if(file->has_ext_cksum || session->cfg->write_cksum_to_xattr == false) {
+    if(file->has_ext_cksum || cfg->write_cksum_to_xattr == false) {
         return EINVAL;
     }
 
@@ -170,8 +170,8 @@ int rm_xattr_write_hash(RmSession *session, RmFile *file) {
     int timestamp_bytes = 0;
     double actual_time_sec = difftime(file->mtime, 0);
 
-    if(rm_xattr_build_key(session, "cksum", cksum_key, sizeof(cksum_key)) ||
-       rm_xattr_build_key(session, "mtime", mtime_key, sizeof(mtime_key)) ||
+    if(rm_xattr_build_key(cfg, "cksum", cksum_key, sizeof(cksum_key)) ||
+       rm_xattr_build_key(cfg, "mtime", mtime_key, sizeof(mtime_key)) ||
        rm_xattr_build_cksum(file, cksum_hex_str, sizeof(cksum_hex_str)) <= 0 ||
        rm_xattr_set(file, cksum_key, cksum_hex_str, sizeof(cksum_hex_str)) ||
        (timestamp_bytes = snprintf(
@@ -183,12 +183,12 @@ int rm_xattr_write_hash(RmSession *session, RmFile *file) {
     return 0;
 }
 
-char *rm_xattr_read_hash(RmSession *session, RmFile *file) {
+char *rm_xattr_read_hash(RmCfg *cfg, RmFile *file) {
     rm_assert_gentle(file);
-    rm_assert_gentle(session);
+    rm_assert_gentle(cfg);
 
 #if HAVE_XATTR
-    if(session->cfg->read_cksum_from_xattr == false) {
+    if(cfg->read_cksum_from_xattr == false) {
         return NULL;
     }
 
@@ -198,16 +198,16 @@ char *rm_xattr_read_hash(RmSession *session, RmFile *file) {
     memset(cksum_hex_str, '0', sizeof(cksum_hex_str));
     cksum_hex_str[sizeof(cksum_hex_str) - 1] = 0;
 
-    if(0 || rm_xattr_build_key(session, "cksum", cksum_key, sizeof(cksum_key)) ||
+    if(0 || rm_xattr_build_key(cfg, "cksum", cksum_key, sizeof(cksum_key)) ||
        rm_xattr_get(file, cksum_key, cksum_hex_str, sizeof(cksum_hex_str) - 1) ||
-       rm_xattr_build_key(session, "mtime", mtime_key, sizeof(mtime_key)) ||
+       rm_xattr_build_key(cfg, "mtime", mtime_key, sizeof(mtime_key)) ||
        rm_xattr_get(file, mtime_key, mtime_buf, sizeof(mtime_buf) - 1)) {
         return NULL;
     }
 
     if(g_ascii_strtoll(mtime_buf, NULL, 10) < file->mtime) {
         /* Data is too old and not useful, autoclean it */
-        rm_xattr_clear_hash(session, file);
+        rm_xattr_clear_hash(cfg, file);
         return NULL;
     }
 
@@ -220,9 +220,9 @@ char *rm_xattr_read_hash(RmSession *session, RmFile *file) {
 #endif
 }
 
-int rm_xattr_clear_hash(RmSession *session, RmFile *file) {
+int rm_xattr_clear_hash(RmCfg *cfg, RmFile *file) {
     rm_assert_gentle(file);
-    rm_assert_gentle(session);
+    rm_assert_gentle(cfg);
 
 #if HAVE_XATTR
     int error = 0;
@@ -231,7 +231,7 @@ int rm_xattr_clear_hash(RmSession *session, RmFile *file) {
     for(int i = 0; keys[i]; ++i) {
         char key[64] = {0};
 
-        if(rm_xattr_build_key(session, keys[i], key, sizeof(key))) {
+        if(rm_xattr_build_key(cfg, keys[i], key, sizeof(key))) {
             error = EINVAL;
             continue;
         }

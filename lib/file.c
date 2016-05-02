@@ -31,9 +31,8 @@
 #include <sys/file.h>
 #include <string.h>
 
-RmFile *rm_file_new(struct RmSession *session, const char *path, RmStat *statp,
-                    RmLintType type, bool is_ppath, unsigned path_index, short depth) {
-    RmCfg *cfg = session->cfg;
+RmFile *rm_file_new(RmCfg *cfg, const char *path, RmStat *statp, RmLintType type,
+                    bool is_ppath, unsigned path_index, short depth) {
     RmOff actual_file_size = statp->st_size;
     RmOff start_seek = 0;
 
@@ -57,7 +56,7 @@ RmFile *rm_file_new(struct RmSession *session, const char *path, RmStat *statp,
     }
 
     RmFile *self = g_slice_new0(RmFile);
-    self->session = session;
+    self->cfg = cfg;
 
     rm_file_set_path(self, (char *)path);
 
@@ -88,13 +87,13 @@ RmFile *rm_file_new(struct RmSession *session, const char *path, RmStat *statp,
 }
 
 void rm_file_set_path(RmFile *file, char *path) {
-    file->folder = rm_trie_insert(&file->session->cfg->file_trie, path, NULL);
+    file->folder = rm_trie_insert((RmTrie *)&file->cfg->file_trie, path, NULL);
 }
 
 void rm_file_build_path(RmFile *file, char *buf) {
     rm_assert_gentle(file);
 
-    rm_trie_build_path(&file->session->cfg->file_trie, file->folder, buf, PATH_MAX);
+    rm_trie_build_path((RmTrie *)&file->cfg->file_trie, file->folder, buf, PATH_MAX);
 }
 
 void rm_file_destroy(RmFile *file) {

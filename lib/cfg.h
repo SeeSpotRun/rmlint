@@ -120,27 +120,9 @@ typedef struct RmCfg {
      */
     gboolean cache_file_structs;
 
-    /* Version of the linux kernel (0 on other operating systems) */
-    int kernel_version[2];
-
     /* Daniels paranoia */
     RmOff hash_seed1;
     RmOff hash_seed2;
-
-    /* count used for determining the verbosity level */
-    int verbosity_count;
-
-    /* count used for determining the paranoia level */
-    int paranoia_count;
-
-    /* count for -o and -O; initialized to -1 */
-    int output_cnt[2];
-
-    /* true if a cmdline parse error happened */
-    bool cmdline_parse_error;
-
-    /* Output formatting control */
-    struct RmFmtTable *formats;
 
     /* List of path to json files that should be re-outputted. */
     GQueue replay_files;
@@ -154,16 +136,5 @@ typedef struct RmCfg {
  * @brief Reset RmCfg to default cfg and all other vars to 0.
  */
 void rm_cfg_set_default(RmCfg *cfg);
-
-/**
- * @brief Check the kernel version of the Linux kernel.
- *
- * @param session Session to ask. Version is cached in the session.
- * @param major The major version it should have at least.
- * @param minor The minor version it should have at least.
- *
- * @return True if the kernel is recent enough.
- */
-bool rm_cfg_check_kernel_version(RmCfg *cfg, int major, int minor);
 
 #endif /* end of include guard */

@@ -300,6 +300,7 @@ void rm_file_tables_clear(const RmSession *session) {
     g_hash_table_iter_init(&iter, session->tables->node_table);
     while(g_hash_table_iter_next(&iter, &key, NULL)) {
         RmFile *file = key;
+        rm_assert_gentle(!file);
         if(file) {
             rm_file_destroy(file);
         }
@@ -308,54 +309,40 @@ void rm_file_tables_clear(const RmSession *session) {
 
 /* if file is not DUPE_CANDIDATE then send it to session->tables->other_lint and
  * return 1; else return 0 */
-static gboolean rm_pp_handle_other_lint(RmFile *file, const RmSession *session) {
+static bool rm_pp_handle_other_lint(RmFile *file, const RmSession *session) {
     if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         return FALSE;
     }
-
+    /* TODO: move to traversal? */
     if(session->cfg->filter_mtime && file->mtime < session->cfg->min_mtime) {
-        rm_file_destroy(file);
+        file->lint_type = RM_LINT_TYPE_WRONG_TIME;
     } else if((session->cfg->keep_all_tagged && file->is_prefd) ||
               (session->cfg->keep_all_untagged && !file->is_prefd)) {
         /* "Other" lint protected by --keep-all-{un,}tagged */
-        rm_file_destroy(file);
-    } else {
-        session->tables->other_lint[file->lint_type] =
-            g_list_prepend(session->tables->other_lint[file->lint_type], file);
+        file->lint_type = RM_LINT_TYPE_KEEP_TAGGED;
     }
+    session->tables->other_lint[file->lint_type] =
+        g_slist_prepend(session->tables->other_lint[file->lint_type], file);
     return TRUE;
 }
 
-static gboolean rm_pp_check_path_double(RmFile *file, GHashTable *unique_paths_table) {
+static bool rm_pp_check_path_double(RmFile *file, RmSession *session) {
     RmPathDoubleKey *key = rm_path_double_new(file);
 
     /* Lookup if there is a file with the same path */
-    RmPathDoubleKey *match_double_key = g_hash_table_lookup(unique_paths_table, key);
+    RmPathDoubleKey *match_double_key =
+        g_hash_table_lookup(session->tables->unique_paths_table, key);
 
     if(match_double_key == NULL) {
-        g_hash_table_add(unique_paths_table, key);
+        g_hash_table_add(session->tables->unique_paths_table, key);
         return FALSE;
     }
     RmFile *match_double = match_double_key->file;
     rm_assert_gentle(match_double != file);
 
     rm_path_double_free(key);
-    rm_file_destroy(file);
-    return TRUE;
-}
-
-static gint rm_pp_handle_hardlink(RmFile *file, RmFile *head) {
-    if(file == head) {
-        return FALSE;
-    }
-
-    if(head->hardlinks.is_head) {
-        /* bundle hardlink */
-        g_queue_push_tail(head->hardlinks.files, file);
-        file->hardlinks.hardlink_head = head;
-    }
-
-    /* remove file from inode_cluster queue */
+    file->lint_type = RM_LINT_TYPE_PATHDOUBLE;
+    g_thread_pool_push(session->preprocess_file_pipe, file, NULL);
     return TRUE;
 }
 
@@ -374,19 +361,19 @@ static gboolean rm_pp_handle_inode_clusters(_UNUSED gpointer key, GQueue *inode_
         /* there is a cluster of inode matches */
 
         /* remove path doubles */
-        session->counters->total_filtered_files -=
-            rm_util_queue_foreach_remove(inode_cluster, (RmRFunc)rm_pp_check_path_double,
-                                         session->tables->unique_paths_table);
+        rm_util_queue_foreach_remove(inode_cluster, (RmRFunc)rm_pp_check_path_double,
+                                     session);
         /* clear the hashtable ready for the next cluster */
         g_hash_table_remove_all(session->tables->unique_paths_table);
     }
 
     /* process and remove other lint */
-    session->counters->total_filtered_files -= rm_util_queue_foreach_remove(
-        inode_cluster, (RmRFunc)rm_pp_handle_other_lint, (RmSession *)session);
+    rm_util_queue_foreach_remove(inode_cluster, (RmRFunc)rm_pp_handle_other_lint,
+                                 (RmSession *)session);
 
     if(inode_cluster->length > 1) {
         /* bundle or free the non-head files */
+        /* TODO: defer this until shredder */
         RmFile *headfile = inode_cluster->head->data;
         if(cfg->find_hardlinked_dupes) {
             /* prepare to bundle files under the hardlink head */
@@ -394,63 +381,32 @@ static gboolean rm_pp_handle_inode_clusters(_UNUSED gpointer key, GQueue *inode_
             headfile->hardlinks.is_head = TRUE;
         }
 
-        /* hardlink cluster are counted as filtered files since they are either
-         * ignored or treated as automatic duplicates depending on settings (so
-         * no effort eaither way); rm_pp_handle_hardlink will either free or bundle
-         * the hardlinks depending on value of headfile->hardlinks.is_head.
-         */
-        session->counters->total_filtered_files -= rm_util_queue_foreach_remove(
-            inode_cluster, (RmRFunc)rm_pp_handle_hardlink, headfile);
+        GList *next = NULL;
+        for(GList *iter = inode_cluster->head->next; iter; iter = next) {
+            next = iter->next;
+            RmFile *file = iter->data;
+            /* bundle hardlink */
+            g_queue_push_tail(headfile->hardlinks.files, file);
+            file->hardlinks.hardlink_head = headfile;
+            /* send to file pipe for counting (hardlink cluster are counted as
+             * filtered files since they are either ignored or treated as automatic
+             * duplicates depending on settings, and occupy no space anyway).
+             */
+            g_thread_pool_push(session->preprocess_file_pipe, file, NULL);
+            g_queue_delete_link(inode_cluster, iter);
+        }
     }
-
-    /* update counters */
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
 
     rm_assert_gentle(inode_cluster->length <= 1);
     if(inode_cluster->length == 1) {
+        /* add file to size group */
+        RmFile *file = inode_cluster->head->data;
+        RM_DEFINE_PATH(file);
         session->tables->size_groups->data = g_slist_prepend(
             session->tables->size_groups->data, inode_cluster->head->data);
     }
 
     return TRUE;
-}
-
-static int rm_pp_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b) {
-    RM_DEFINE_PATH(a);
-    RM_DEFINE_PATH(b);
-    return g_strcmp0(b_path, a_path);
-}
-
-static RmOff rm_pp_handler_other_lint(const RmSession *session) {
-    RmOff num_handled = 0;
-    RmFileTables *tables = session->tables;
-
-    for(RmOff type = 0; type < RM_LINT_TYPE_DUPE_CANDIDATE; ++type) {
-        if(type == RM_LINT_TYPE_EMPTY_DIR) {
-            tables->other_lint[type] = g_list_sort(
-                tables->other_lint[type], (GCompareFunc)rm_pp_cmp_reverse_alphabetical);
-        }
-
-        GList *list = tables->other_lint[type];
-        for(GList *iter = list; iter; iter = iter->next) {
-            RmFile *file = iter->data;
-
-            rm_assert_gentle(file);
-            rm_assert_gentle(type == file->lint_type);
-
-            num_handled++;
-
-            rm_fmt_write(file, session->formats, -1);
-        }
-
-        if(!session->cfg->cache_file_structs) {
-            g_list_free_full(list, (GDestroyNotify)rm_file_destroy);
-        } else {
-            g_list_free(list);
-        }
-    }
-
-    return num_handled;
 }
 
 /* This does preprocessing including handling of "other lint" (non-dupes)
@@ -467,20 +423,16 @@ void rm_preprocess(RmSession *session) {
     RmFileTables *tables = session->tables;
     GQueue *all_files = tables->all_files;
 
-    session->counters->total_filtered_files = session->counters->total_files;
-
     /* initial sort by size */
     g_queue_sort(all_files, (GCompareDataFunc)rm_file_cmp_full, session);
-    rm_log_debug_line("initial size sort finished at time %.3f; sorted %d files",
-                      g_timer_elapsed(session->timer, NULL),
-                      session->counters->total_files);
+    rm_log_debug_line("initial size sort finished at time %.3f",
+                      g_timer_elapsed(session->timer, NULL));
 
     /* split into file size groups; for each size, remove path doubles and bundle
      * hardlinks */
     rm_assert_gentle(all_files->head);
     RmFile *file = g_queue_pop_head(all_files);
     RmFile *current_size_file = file;
-    guint removed = 0;
     GHashTable *node_table = tables->node_table;
     while(file && !rm_session_was_aborted()) {
         /* group files into inode clusters */
@@ -495,14 +447,14 @@ void rm_preprocess(RmSession *session) {
             /* process completed group (all same size & other criteria)*/
             /* remove path doubles and handle "other" lint */
 
-            /* add an empty GSlist to our list of lists */
+            /* add an empty GSlist to our list of lists; rm_pp_handle_inode_clusters
+             * will populate this */
             tables->size_groups = g_slist_prepend(tables->size_groups, NULL);
 
-            removed += g_hash_table_foreach_remove(
+            g_hash_table_foreach_remove(
                 node_table, (GHRFunc)rm_pp_handle_inode_clusters, session);
 
             /* free up the node table for the next group */
-            g_hash_table_steal_all(node_table);
             if(tables->size_groups->data == NULL) {
                 /* zero size group after handling other lint; remove it */
                 tables->size_groups =
@@ -511,13 +463,4 @@ void rm_preprocess(RmSession *session) {
             current_size_file = file;
         }
     }
-
-    session->counters->other_lint_cnt += rm_pp_handler_other_lint(session);
-
-    rm_log_debug_line(
-        "path doubles removal/hardlink bundling/other lint finished at %.3f; removed %u "
-        "of %d",
-        g_timer_elapsed(session->timer, NULL), removed, session->counters->total_files);
-
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS_DONE);
 }

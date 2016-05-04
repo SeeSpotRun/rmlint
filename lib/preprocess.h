@@ -32,7 +32,6 @@
 /**
  * @brief Do some pre-processing (eg remove path doubles) and process "other lint".
  *
- * Returns: number of other lint items found.
  */
 void rm_preprocess(RmSession *session);
 

@@ -48,7 +48,7 @@ typedef struct RmFileTables {
     GHashTable *unique_paths_table;
 
     /*array of lists, one for each "other lint" type */
-    GList *other_lint[RM_LINT_TYPE_DUPE_CANDIDATE];
+    GSList *other_lint[RM_LINT_TYPE_OTHER];
 
     /* lock for access to *list during traversal */
     GMutex lock;
@@ -112,6 +112,8 @@ typedef struct RmSession {
     /* true once traverse finished running */
     bool traverse_finished;
 
+    /* temporary? */
+    GThreadPool *preprocess_file_pipe;
 } RmSession;
 
 /**

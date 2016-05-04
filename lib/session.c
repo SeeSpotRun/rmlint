@@ -62,7 +62,7 @@ void rm_session_clear(RmSession *session) {
     rm_fmt_close(session->formats);
 
     g_timer_destroy(session->timer);
-    rm_file_tables_destroy(session->tables);
+    rm_file_tables_destroy(session->tables); /* TODO: maybe earlier? */
     if(session->mounts) {
         rm_mounts_table_destroy(session->mounts);
     }
@@ -131,11 +131,11 @@ static int rm_session_replay(RmSession *session) {
     return EXIT_SUCCESS;
 }
 
-/* threadpool to receive files from traverser.
+/* threadpipe to receive files from traverser.
  * single threaded; assumes safe access to tables->all_files
  * and session->counters.
  */
-static void rm_session_file_pool(RmFile *file, RmSession *session) {
+static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
     if(rm_mounts_is_evil(session->mounts, file->dev)
        /* A file in an evil fs. Ignore. */
        ||
@@ -171,8 +171,66 @@ static void rm_session_file_pool(RmFile *file, RmSession *session) {
     }
     g_queue_push_tail(session->tables->all_files, file);
 
-    if(++session->counters->total_files % 100 == 0) {
-        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+    session->counters->total_files++;
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+}
+
+/* threadpipe to receive "other" lint and rejected files from preprocess.
+ * single threaded; runs concurrently with rm_session_pp_files_pipe.
+ * Assumes safe access to session->tables->other_lint and session->counters.
+ */
+static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
+    rm_assert_gentle(file->lint_type <= RM_LINT_TYPE_DUPE_CANDIDATE);
+
+    if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+        /* bundled hardlink is counted as filtered file */
+        rm_assert_gentle(file->hardlinks.hardlink_head);
+        session->counters->total_filtered_files--;
+    } else if(file->lint_type >= RM_LINT_TYPE_OTHER) {
+        /* filtered reject based on mtime, --keep, etc */
+        session->counters->total_filtered_files--;
+        rm_file_destroy(file);
+    } else {
+        /* collect "other lint" for later processing */
+        session->tables->other_lint[file->lint_type] =
+            g_slist_prepend(session->tables->other_lint[file->lint_type], file);
+        session->counters->other_lint_cnt++;
+    }
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
+}
+
+static int rm_session_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b) {
+    RM_DEFINE_PATH(a);
+    RM_DEFINE_PATH(b);
+    return g_strcmp0(b_path, a_path);
+}
+
+static void rm_session_output_other_lint(const RmSession *session) {
+    RmFileTables *tables = session->tables;
+
+    for(RmOff type = 0; type < RM_LINT_TYPE_OTHER; ++type) {
+        if(type == RM_LINT_TYPE_EMPTY_DIR) {
+            /* sort empty dirs in reverse so that they can be deleted sequentially */
+            tables->other_lint[type] =
+                g_slist_sort(tables->other_lint[type],
+                             (GCompareFunc)rm_session_cmp_reverse_alphabetical);
+        }
+
+        GSList *list = tables->other_lint[type];
+        for(GSList *iter = list; iter; iter = iter->next) {
+            RmFile *file = iter->data;
+
+            rm_assert_gentle(file);
+            rm_assert_gentle(type == file->lint_type);
+
+            rm_fmt_write(file, session->formats, -1);
+        }
+
+        if(!session->cfg->cache_file_structs) {
+            g_slist_free_full(list, (GDestroyNotify)rm_file_destroy);
+        } else {
+            g_slist_free(list);
+        }
     }
 }
 
@@ -207,14 +265,15 @@ int rm_session_run(RmSession *session) {
     /* --- Traversal --- */
 
     /* Create a single-threaded pool to receive files from traverse */
-    GThreadPool *file_pool =
-        rm_util_thread_pool_new((GFunc)rm_session_file_pool, session, 1);
+    GThreadPool *traverse_file_pool =
+        rm_util_thread_pool_new((GFunc)rm_session_traverse_pipe, session, 1);
 
-    rm_traverse_tree(session->cfg, file_pool, session->mds);
+    rm_traverse_tree(session->cfg, traverse_file_pool, session->mds);
     rm_log_debug_line("Traversal finished at %.3f",
                       g_timer_elapsed(session->timer, NULL));
 
-    g_thread_pool_free(file_pool, FALSE, TRUE);
+    g_thread_pool_free(traverse_file_pool, FALSE, TRUE);
+    session->traverse_finished = TRUE;
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
 
     rm_log_debug_line(
@@ -226,8 +285,33 @@ int rm_session_run(RmSession *session) {
     /* --- Preprocessing --- */
 
     if(session->counters->total_files >= 1) {
+        session->counters->total_filtered_files = session->counters->total_files;
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
+
+        /* Create a single-threaded pools to receive files and groups from traverse */
+        session->preprocess_file_pipe =
+            rm_util_thread_pool_new((GFunc)rm_session_pp_files_pipe, session, 1);
+
         rm_preprocess(session);
+        rm_log_debug_line(
+            "path doubles removal/hardlink bundling/other lint stripping finished at "
+            "%.3f",
+            g_timer_elapsed(session->timer, NULL));
+
+        g_thread_pool_free(session->preprocess_file_pipe, FALSE, TRUE);
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
+        rm_log_debug_line(
+            "Preprocessing finished at %.3f with %d files; ignored %d hidden files and "
+            "%d "
+            "hidden folders",
+            g_timer_elapsed(session->timer, NULL), session->counters->total_files,
+            session->counters->ignored_files, session->counters->ignored_folders);
+
+        rm_session_output_other_lint(session);
+
+        rm_log_debug_line("Preprocessing output finished at %.3f (%lu other lint)",
+                          g_timer_elapsed(session->timer, NULL),
+                          session->counters->other_lint_cnt);
 
         if(cfg->find_duplicates || cfg->merge_directories) {
             rm_shred_run(session);

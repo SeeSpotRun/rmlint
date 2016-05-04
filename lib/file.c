@@ -58,7 +58,7 @@ RmFile *rm_file_new(RmCfg *cfg, const char *path, RmStat *statp, RmLintType type
     RmFile *self = g_slice_new0(RmFile);
     self->cfg = cfg;
 
-    rm_file_set_path(self, (char *)path);
+    self->path = g_strdup(path);
 
     self->depth = depth;
     self->path_depth = rm_util_path_depth(path);
@@ -86,8 +86,10 @@ RmFile *rm_file_new(RmCfg *cfg, const char *path, RmStat *statp, RmLintType type
     return self;
 }
 
-void rm_file_set_path(RmFile *file, char *path) {
+void rm_file_zip_path(RmFile *file, const char *path) {
     file->folder = rm_trie_insert((RmTrie *)&file->cfg->file_trie, path, NULL);
+    g_free(file->path);
+    file->path = NULL;
 }
 
 void rm_file_build_path(RmFile *file, char *buf) {

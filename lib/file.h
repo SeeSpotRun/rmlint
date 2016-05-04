@@ -105,12 +105,11 @@ typedef guint16 RmPatternBitmask;
  */
 
 typedef struct RmFile {
-    /* file path lookup ID (if using swap table)
-        * */
-    RmOff path_id;
+    /* conventional string path, only used briefly during traversal */
+    char *path;
 
-    /* file folder as node of folder n-ary tree
-     * */
+    /* path 'zipped' as a node of folder n-ary tree (memory efficient
+     * but slower) */
     RmNode *folder;
 
     /* File modification date/time
@@ -291,10 +290,10 @@ const char *rm_file_lint_type_to_string(RmLintType type);
 RmLintType rm_file_string_to_lint_type(const char *type);
 
 /**
- * @brief Set a path to the file. Normally, you should never do this since the
- * path is immutable.
+ * @brief Convert file from conventional file->path char* to more
+ * memory-efficient pathtricia.
  */
-void rm_file_set_path(RmFile *file, char *path);
+void rm_file_zip_path(RmFile *file, const char *path);
 
 /**
  * @brief Internal helper function for RM_DEFINE_PATH using folder tree and basename.

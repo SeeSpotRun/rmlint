@@ -136,12 +136,10 @@ static int rm_session_replay(RmSession *session) {
  * and session->counters.
  */
 static void rm_session_file_pool(RmFile *file, RmSession *session) {
-    RM_DEFINE_PATH(file);
-
     if(rm_mounts_is_evil(session->mounts, file->dev)
        /* A file in an evil fs. Ignore. */
        ||
-       rm_fmt_is_a_output(session->formats, file_path)
+       rm_fmt_is_a_output(session->formats, file->path)
        /* ignore files which are rmlint outputs */
        ||
        (file->lint_type == RM_LINT_TYPE_EMPTY_FILE && !session->cfg->find_emptyfiles)
@@ -151,15 +149,21 @@ static void rm_session_file_pool(RmFile *file, RmSession *session) {
        file->lint_type == RM_LINT_TYPE_WRONG_SIZE ||
        file->lint_type == RM_LINT_TYPE_HIDDEN_FILE) {
         session->counters->ignored_files++;
+        g_free(file->path);
         rm_file_destroy(file);
         return;
     }
 
     if(file->lint_type == RM_LINT_TYPE_HIDDEN_DIR) {
         session->counters->ignored_folders++;
+        g_free(file->path);
         rm_file_destroy(file);
         return;
     }
+
+    /* convert from regular path to pathtricia */
+    rm_file_zip_path(file, file->path);
+    g_free(file->path);
 
     if(session->cfg->clear_xattr_fields &&
        file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {

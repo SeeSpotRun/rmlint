@@ -103,11 +103,6 @@ typedef struct RmSession {
     /* timer used for debugging and profiling messages */
     GTimer *timer;
 
-    /* true once shredder finished running */
-    bool shredder_finished;
-
-    /* true once traverse finished running */
-    bool traverse_finished;
 } RmSession;
 
 /**

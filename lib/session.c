@@ -270,8 +270,7 @@ int rm_session_run(RmSession *session) {
                       g_timer_elapsed(session->timer, NULL));
 
     g_thread_pool_free(traverse_file_pool, FALSE, TRUE);
-    session->traverse_finished = TRUE;
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE_DONE);
 
     rm_log_debug_line(
         "List build finished at %.3f with %d files; ignored %d hidden files and %d "

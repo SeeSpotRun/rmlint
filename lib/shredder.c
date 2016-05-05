@@ -1596,8 +1596,7 @@ void rm_shred_run(RmSession *session) {
     rm_mds_free(session->mds, FALSE);
     rm_hasher_free(tag.hasher, TRUE);
 
-    session->shredder_finished = TRUE;
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER_DONE);
 
     /* This should not block, or at least only very short. */
     g_thread_pool_free(tag.result_pool, FALSE, TRUE);

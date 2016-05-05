@@ -86,6 +86,7 @@ static void rm_fmt_progress_format_text(RmSession *session, RmFmtHandlerProgress
 
     switch(self->last_state) {
     case RM_PROGRESS_STATE_TRAVERSE:
+    case RM_PROGRESS_STATE_TRAVERSE_DONE:
         self->percent = 2.0;
         self->text_len = g_snprintf(
             self->text_buf, sizeof(self->text_buf), "%s (%s%d%s %s / %s%d%s + %s%d%s %s)",
@@ -106,6 +107,7 @@ static void rm_fmt_progress_format_text(RmSession *session, RmFmtHandlerProgress
                                     MAYBE_RESET(out, session), _("other lint"));
         break;
     case RM_PROGRESS_STATE_SHREDDER:
+    case RM_PROGRESS_STATE_SHREDDER_DONE:
         self->percent = 1.0 - ((gdouble)session->counters->shred_bytes_remaining /
                                (gdouble)session->counters->shred_bytes_after_preprocess);
         rm_util_size_to_human_readable(session->counters->shred_bytes_remaining, num_buf,
@@ -344,18 +346,12 @@ static void rm_fmt_prog(RmSession *session,
     if(self->last_state != state && self->last_state != RM_PROGRESS_STATE_INIT) {
         self->percent = 1.05;
         if(state != RM_PROGRESS_STATE_PRE_SHUTDOWN &&
-           state != RM_PROGRESS_STATE_PREPROCESS_DONE) {
+           state != RM_PROGRESS_STATE_TRAVERSE_DONE &&
+           state != RM_PROGRESS_STATE_PREPROCESS_DONE &&
+           state != RM_PROGRESS_STATE_SHREDDER_DONE) {
             rm_fmt_progress_print_bar(session, self, self->terminal.ws_col * 0.3, out);
             fprintf(out, "\n");
         }
-        force_draw = true;
-    }
-
-    if(state == RM_PROGRESS_STATE_TRAVERSE && session->traverse_finished) {
-        force_draw = true;
-    }
-
-    if(state == RM_PROGRESS_STATE_SHREDDER && session->shredder_finished) {
         force_draw = true;
     }
 

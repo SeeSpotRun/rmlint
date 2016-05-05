@@ -46,7 +46,7 @@ void rm_session_init(RmSession *session) {
     session->timer = g_timer_new();
     session->counters = g_slice_new0(RmCounters);
     session->formats = rm_fmt_open(session);
-    session->tables = rm_file_tables_new(session);
+    session->tables = rm_file_tables_new();
 }
 
 void rm_session_clear(RmSession *session) {
@@ -289,16 +289,16 @@ int rm_session_run(RmSession *session) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
 
         /* Create a single-threaded pools to receive files and groups from traverse */
-        session->preprocess_file_pipe =
+        GThreadPool *preprocess_file_pipe =
             rm_util_thread_pool_new((GFunc)rm_session_pp_files_pipe, session, 1);
 
-        rm_preprocess(session);
+        rm_preprocess(session->cfg, session->tables, preprocess_file_pipe);
         rm_log_debug_line(
             "path doubles removal/hardlink bundling/other lint stripping finished at "
             "%.3f",
             g_timer_elapsed(session->timer, NULL));
 
-        g_thread_pool_free(session->preprocess_file_pipe, FALSE, TRUE);
+        g_thread_pool_free(preprocess_file_pipe, FALSE, TRUE);
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
         rm_log_debug_line(
             "Preprocessing finished at %.3f with %d files; ignored %d hidden files and "

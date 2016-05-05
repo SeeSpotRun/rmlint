@@ -108,9 +108,6 @@ typedef struct RmSession {
 
     /* true once traverse finished running */
     bool traverse_finished;
-
-    /* temporary? */
-    GThreadPool *preprocess_file_pipe;
 } RmSession;
 
 /**

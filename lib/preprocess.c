@@ -33,6 +33,12 @@
 #include "cmdline.h"
 #include "shredder.h"
 
+typedef struct RmPPSession {
+    const RmCfg *cfg;
+    RmFileTables *tables;
+    GThreadPool *preprocess_file_pipe;
+} RmPPSession;
+
 static gint rm_file_cmp_with_extension(const RmFile *file_a, const RmFile *file_b) {
     char *ext_a = rm_util_path_extension(file_a->folder->basename);
     char *ext_b = rm_util_path_extension(file_b->folder->basename);
@@ -87,13 +93,12 @@ gint rm_file_cmp(const RmFile *file_a, const RmFile *file_b) {
     return result;
 }
 
-gint rm_file_cmp_full(const RmFile *file_a, const RmFile *file_b,
-                      const RmSession *session) {
+gint rm_file_cmp_full(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
     gint result = rm_file_cmp(file_a, file_b);
     if(result != 0) {
         return result;
     }
-    return rm_pp_cmp_orig_criteria(file_a, file_b, session);
+    return rm_pp_cmp_orig_criteria(file_a, file_b, cfg);
 }
 
 static int rm_node_cmp(const RmFile *file_a, const RmFile *file_b) {
@@ -156,7 +161,7 @@ static void rm_path_double_free(RmPathDoubleKey *key) {
     g_free(key);
 }
 
-RmFileTables *rm_file_tables_new(_UNUSED const RmSession *session) {
+RmFileTables *rm_file_tables_new(void) {
     RmFileTables *tables = g_slice_new0(RmFileTables);
 
     tables->unique_paths_table =
@@ -224,7 +229,7 @@ static int rm_pp_cmp_by_regex(GRegex *regex, int idx, RmPatternBitmask *mask_a,
  *      0 if they are equal,
  *      a positive integer if file 'b' outranks 'a'
  */
-int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *session) {
+int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmCfg *cfg) {
     if(a->lint_type != b->lint_type) {
         /* "other" lint outranks duplicates and has lower ENUM */
         return a->lint_type - b->lint_type;
@@ -234,15 +239,13 @@ int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *s
         return (b->is_prefd - a->is_prefd);
     } else {
         /* Only fill in path if we have a pattern in sort_criteria */
-        bool path_needed = (session->cfg->pattern_cache->len > 0);
+        bool path_needed = (cfg->pattern_cache->len > 0);
         RM_DEFINE_PATH_IF_NEEDED(a, path_needed);
         RM_DEFINE_PATH_IF_NEEDED(b, path_needed);
 
-        RmCfg *sets = session->cfg;
-
-        for(int i = 0, regex_cursor = 0; sets->sort_criteria[i]; i++) {
+        for(int i = 0, regex_cursor = 0; cfg->sort_criteria[i]; i++) {
             long cmp = 0;
-            switch(tolower((unsigned char)sets->sort_criteria[i])) {
+            switch(tolower((unsigned char)cfg->sort_criteria[i])) {
             case 'm':
                 cmp = (long)(a->mtime) - (long)(b->mtime);
                 break;
@@ -260,24 +263,24 @@ int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *s
                 break;
             case 'x': {
                 cmp = rm_pp_cmp_by_regex(
-                    g_ptr_array_index(session->cfg->pattern_cache, regex_cursor),
-                    regex_cursor, (RmPatternBitmask *)&a->pattern_bitmask_basename,
-                    a->folder->basename, (RmPatternBitmask *)&b->pattern_bitmask_basename,
+                    g_ptr_array_index(cfg->pattern_cache, regex_cursor), regex_cursor,
+                    (RmPatternBitmask *)&a->pattern_bitmask_basename, a->folder->basename,
+                    (RmPatternBitmask *)&b->pattern_bitmask_basename,
                     b->folder->basename);
                 regex_cursor++;
                 break;
             }
             case 'r':
                 cmp = rm_pp_cmp_by_regex(
-                    g_ptr_array_index(session->cfg->pattern_cache, regex_cursor),
-                    regex_cursor, (RmPatternBitmask *)&a->pattern_bitmask_path, a_path,
+                    g_ptr_array_index(cfg->pattern_cache, regex_cursor), regex_cursor,
+                    (RmPatternBitmask *)&a->pattern_bitmask_path, a_path,
                     (RmPatternBitmask *)&b->pattern_bitmask_path, b_path);
                 regex_cursor++;
                 break;
             }
             if(cmp) {
                 /* reverse order if uppercase option */
-                cmp = cmp * (isupper((unsigned char)sets->sort_criteria[i]) ? -1 : +1);
+                cmp = cmp * (isupper((unsigned char)cfg->sort_criteria[i]) ? -1 : +1);
                 return cmp;
             }
         }
@@ -287,32 +290,32 @@ int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *s
 
 /* if file is not DUPE_CANDIDATE then send it to session->tables->other_lint and
  * return 1; else return 0 */
-static bool rm_pp_handle_other_lint(RmFile *file, const RmSession *session) {
+static bool rm_pp_handle_other_lint(RmFile *file, const RmPPSession *preprocessor) {
     if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         return FALSE;
     }
     /* TODO: move to traversal? */
-    if(session->cfg->filter_mtime && file->mtime < session->cfg->min_mtime) {
+    if(preprocessor->cfg->filter_mtime && file->mtime < preprocessor->cfg->min_mtime) {
         file->lint_type = RM_LINT_TYPE_WRONG_TIME;
-    } else if((session->cfg->keep_all_tagged && file->is_prefd) ||
-              (session->cfg->keep_all_untagged && !file->is_prefd)) {
+    } else if((preprocessor->cfg->keep_all_tagged && file->is_prefd) ||
+              (preprocessor->cfg->keep_all_untagged && !file->is_prefd)) {
         /* "Other" lint protected by --keep-all-{un,}tagged */
         file->lint_type = RM_LINT_TYPE_KEEP_TAGGED;
     }
-    session->tables->other_lint[file->lint_type] =
-        g_slist_prepend(session->tables->other_lint[file->lint_type], file);
+    preprocessor->tables->other_lint[file->lint_type] =
+        g_slist_prepend(preprocessor->tables->other_lint[file->lint_type], file);
     return TRUE;
 }
 
-static bool rm_pp_check_path_double(RmFile *file, RmSession *session) {
+static bool rm_pp_check_path_double(RmFile *file, RmPPSession *preprocessor) {
     RmPathDoubleKey *key = rm_path_double_new(file);
 
     /* Lookup if there is a file with the same path */
     RmPathDoubleKey *match_double_key =
-        g_hash_table_lookup(session->tables->unique_paths_table, key);
+        g_hash_table_lookup(preprocessor->tables->unique_paths_table, key);
 
     if(match_double_key == NULL) {
-        g_hash_table_add(session->tables->unique_paths_table, key);
+        g_hash_table_add(preprocessor->tables->unique_paths_table, key);
         return FALSE;
     }
     RmFile *match_double = match_double_key->file;
@@ -320,7 +323,7 @@ static bool rm_pp_check_path_double(RmFile *file, RmSession *session) {
 
     rm_path_double_free(key);
     file->lint_type = RM_LINT_TYPE_PATHDOUBLE;
-    g_thread_pool_push(session->preprocess_file_pipe, file, NULL);
+    g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
     return TRUE;
 }
 
@@ -333,21 +336,22 @@ static bool rm_pp_check_path_double(RmFile *file, RmSession *session) {
  * cluster can be deleted from the node_table hash table.
  * NOTE: we rely on rm_file_list_insert to select an RM_LINT_TYPE_DUPE_CANDIDATE as head
  * file (unless ALL the files are "other lint"). */
-static RmFile *rm_preprocess_cluster(GSList *cluster, RmSession *session) {
-    RmCfg *cfg = session->cfg;
+static RmFile *rm_preprocess_cluster(GSList *cluster, RmPPSession *preprocessor) {
+    const RmCfg *cfg = preprocessor->cfg;
 
     if(RM_SLIST_LEN_GT_1(cluster)) {
         /* there is a cluster of inode matches */
 
         /* remove path doubles */
-        rm_util_slist_foreach_remove(&cluster, (RmRFunc)rm_pp_check_path_double, session);
+        rm_util_slist_foreach_remove(&cluster, (RmRFunc)rm_pp_check_path_double,
+                                     preprocessor);
         /* clear the hashtable ready for the next cluster */
-        g_hash_table_remove_all(session->tables->unique_paths_table);
+        g_hash_table_remove_all(preprocessor->tables->unique_paths_table);
     }
 
     /* process and remove other lint */
     rm_util_slist_foreach_remove(&cluster, (RmRFunc)rm_pp_handle_other_lint,
-                                 (RmSession *)session);
+                                 (RmPPSession *)preprocessor);
 
     if(RM_SLIST_LEN_GT_1(cluster)) {
         /* bundle or free the non-head files */
@@ -374,7 +378,7 @@ static RmFile *rm_preprocess_cluster(GSList *cluster, RmSession *session) {
              * filtered files since they are either ignored or treated as automatic
              * duplicates depending on settings, and occupy no space anyway).
              */
-            g_thread_pool_push(session->preprocess_file_pipe, file, NULL);
+            g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
         }
         g_slist_free(hardlinks);
     }
@@ -389,7 +393,7 @@ static RmFile *rm_preprocess_cluster(GSList *cluster, RmSession *session) {
     return NULL;
 }
 
-static GSList *rm_preprocess_size_group(GSList *head, RmSession *session) {
+static GSList *rm_preprocess_size_group(GSList *head, RmPPSession *preprocessor) {
     /* sort by inode so we can identify inode clusters; this is faster
      * and lighter than hashtable approach */
     GSList *result = NULL;
@@ -401,7 +405,7 @@ static GSList *rm_preprocess_size_group(GSList *head, RmSession *session) {
             /* next inode found; split the list */
             iter->next = NULL;
             /* process head...iter to remove lint and bundle hardlinks */
-            RmFile *cluster_file = rm_preprocess_cluster(head, session);
+            RmFile *cluster_file = rm_preprocess_cluster(head, preprocessor);
             if(cluster_file) {
                 result = g_slist_prepend(result, cluster_file);
             }
@@ -422,20 +426,22 @@ static GSList *rm_preprocess_size_group(GSList *head, RmSession *session) {
  *                                     ->file2b
  *                                       etc
  */
-void rm_preprocess(RmSession *session) {
-    RmFileTables *tables = session->tables;
-    GSList *head = tables->all_files;
-    tables->all_files = NULL;
-    rm_assert_gentle(head);
+void rm_preprocess(const RmCfg *cfg, RmFileTables *tables,
+                   GThreadPool *preprocess_file_pipe) {
+    RmPPSession *preprocessor = g_slice_new(RmPPSession);
+    preprocessor->cfg = cfg;
+    preprocessor->tables = tables;
+    preprocessor->preprocess_file_pipe = preprocess_file_pipe;
+
+    rm_assert_gentle(tables->all_files);
 
     /* initial sort by size */
-    head = g_slist_sort_with_data(head, (GCompareDataFunc)rm_file_cmp_full, session);
-    rm_log_debug_line("initial size sort finished at time %.3f",
-                      g_timer_elapsed(session->timer, NULL));
+    tables->all_files = g_slist_sort_with_data(
+        tables->all_files, (GCompareDataFunc)rm_file_cmp_full, (gpointer)cfg);
 
     /* split into file size groups and process each group to remove path doubles etc */
     GSList *next = NULL;
-    for(GSList *iter = head; iter; iter = next) {
+    for(GSList *iter = tables->all_files; iter; iter = next) {
         next = iter->next;
         if(!next || rm_file_cmp(iter->data, next->data) != 0) {
             /* split list and process size group*/
@@ -443,11 +449,13 @@ void rm_preprocess(RmSession *session) {
                 break;
             }
             iter->next = NULL;
-            GSList *size_group = rm_preprocess_size_group(head, session);
+            GSList *size_group =
+                rm_preprocess_size_group(tables->all_files, preprocessor);
             if(size_group) {
                 tables->size_groups = g_slist_prepend(tables->size_groups, size_group);
             }
-            head = next;
+            tables->all_files = next;
         }
     }
+    g_slice_free(RmPPSession, preprocessor);
 }

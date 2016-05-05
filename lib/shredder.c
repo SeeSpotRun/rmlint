@@ -1067,7 +1067,7 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
  * 2. Use g_hash_table_foreach_remove to delete all singleton and other
  *    non-qualifying groups from size_groups via rm_shred_group_preprocess.
  * 3. Use g_hash_table_foreach to do the FIEMAP lookup for all remaining
- * 	  files via rm_shred_device_preprocess.
+ *    files via rm_shred_device_preprocess.
  * */
 
 /* Called for each file; find appropriate RmShredGroup (ie files with same size) and
@@ -1180,7 +1180,7 @@ int rm_shred_cmp_orig_criteria(RmFile *a, RmFile *b, RmSession *session) {
               (cfg->keep_all_untagged || cfg->must_match_untagged)) {
         return (a->is_prefd - b->is_prefd);
     } else {
-        int comparasion = rm_pp_cmp_orig_criteria(a, b, session);
+        int comparasion = rm_pp_cmp_orig_criteria(a, b, session->cfg);
         if(comparasion == 0) {
             return b->is_original - a->is_original;
         }

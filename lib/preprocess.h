@@ -33,19 +33,20 @@
  * @brief Do some pre-processing (eg remove path doubles) and process "other lint".
  *
  */
-void rm_preprocess(RmSession *session);
+void rm_preprocess(const RmCfg *cfg, RmFileTables *tables,
+                   GThreadPool *preprocess_file_pipe);
 
 /**
  * @brief Create a new RmFileTable object.
  *
  * @return A newly allocated RmFileTable.
  */
-RmFileTables *rm_file_tables_new(const RmSession *session);
+RmFileTables *rm_file_tables_new(void);
 
 /**
 * @brief Free a previous RmFileTable
 */
-void rm_file_tables_destroy(RmFileTables *list);
+void rm_file_tables_destroy(RmFileTables *tables);
 
 /**
  * @brief Compare two files in order to find out which file is the
@@ -53,7 +54,7 @@ void rm_file_tables_destroy(RmFileTables *list);
  *
  * Returns: -1 if a > b, 0 if a == b and +1 else.
  */
-int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmSession *session);
+int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmCfg *cfg);
 
 /**
  * @brief: Check if two files are equal in terms of size, and match_* options.

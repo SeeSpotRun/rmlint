@@ -48,11 +48,6 @@ RmFileTables *rm_file_tables_new(const RmSession *session);
 void rm_file_tables_destroy(RmFileTables *list);
 
 /**
- * @brief Clear potential leftover files when shredder was not used.
- */
-void rm_file_tables_clear(const RmSession *session);
-
-/**
  * @brief Compare two files in order to find out which file is the
  * higher ranked (ie original).
  *

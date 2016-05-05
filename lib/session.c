@@ -169,7 +169,7 @@ static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
        file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         rm_xattr_clear_hash(session->cfg, file);
     }
-    g_queue_push_tail(session->tables->all_files, file);
+    session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
 
     session->counters->total_files++;
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
@@ -318,9 +318,6 @@ int rm_session_run(RmSession *session) {
 
             rm_log_debug_line("Dupe search finished at time %.3f",
                               g_timer_elapsed(session->timer, NULL));
-        } else {
-            /* Clear leftovers */
-            rm_file_tables_clear(session);
         }
     }
 

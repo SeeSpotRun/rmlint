@@ -65,6 +65,7 @@ typedef enum RmLintType {
     RM_LINT_TYPE_WRONG_TIME,
     RM_LINT_TYPE_KEEP_TAGGED,
     RM_LINT_TYPE_PATHDOUBLE,
+    RM_LINT_TYPE_HARDLINK,
 
     /* note: this needs to be after all non-duplicate lint type item in list */
     RM_LINT_TYPE_DUPE_CANDIDATE,

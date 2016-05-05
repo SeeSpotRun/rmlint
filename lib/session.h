@@ -36,13 +36,10 @@
 
 typedef struct RmFileTables {
     /* List of all files found during traversal */
-    GQueue *all_files;
+    GSList *all_files;
 
     /* GSList of GList's, one for each file size */
     GSList *size_groups;
-
-    /* Used for finding inode matches */
-    GHashTable *node_table;
 
     /* Used for finding path doubles */
     GHashTable *unique_paths_table;

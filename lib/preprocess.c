@@ -117,9 +117,9 @@ typedef struct RmPathDoubleKey {
 
 } RmPathDoubleKey;
 
-static guint rm_path_double_hash(const RmPathDoubleKey *key) {
+static gpointer rm_path_double_hash(const RmPathDoubleKey *key) {
     /* depend only on the always set components, never change the hash duringthe run */
-    return rm_node_hash(key->file);
+    return (gpointer)key->file->folder->parent;
 }
 
 static bool rm_path_have_same_parent(RmPathDoubleKey *key_a, RmPathDoubleKey *key_b) {

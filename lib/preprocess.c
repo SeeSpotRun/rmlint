@@ -242,6 +242,15 @@ static GSList *rm_preprocess_size_group(GSList *head, RmPPSession *preprocessor)
             head = next;
         }
     }
+    if(result && !result->next && !((RmFile *)result->data)->hardlinks.is_head) {
+        /* singleton group; discard */
+        RmFile *file = result->data;
+        file->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
+        g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
+        g_slist_free(result);
+        result = NULL;
+    }
+
     return result;
 }
 

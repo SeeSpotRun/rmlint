@@ -180,13 +180,15 @@ static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
  * Assumes safe access to session->tables->other_lint and session->counters.
  */
 static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
-    rm_assert_gentle(file->lint_type <= RM_LINT_TYPE_DUPE_CANDIDATE);
-
     if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         /* bundled hardlink is counted as filtered file */
         rm_assert_gentle(file->hardlinks.hardlink_head);
         session->counters->total_filtered_files--;
+    } else if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
+        session->counters->total_filtered_files--;
+        rm_fmt_write(file, session->formats, 1);
     } else if(file->lint_type >= RM_LINT_TYPE_OTHER) {
+        rm_assert_gentle(file->lint_type <= RM_LINT_TYPE_DUPE_CANDIDATE);
         /* filtered reject based on mtime, --keep, etc */
         session->counters->total_filtered_files--;
         rm_file_destroy(file);

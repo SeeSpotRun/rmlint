@@ -96,6 +96,7 @@ static void rm_fmt_progress_format_text(RmSession *session, RmFmtHandlerProgress
             MAYBE_RESET(out, session), _("ignored files / folders"));
         break;
     case RM_PROGRESS_STATE_PREPROCESS:
+    case RM_PROGRESS_STATE_PREPROCESS_DONE:
         self->percent = 2.0;
         rm_fmt_progress_format_preprocess(session, preproc_buf, sizeof(preproc_buf), out);
         self->text_len = g_snprintf(self->text_buf, sizeof(self->text_buf),
@@ -342,21 +343,19 @@ static void rm_fmt_prog(RmSession *session,
 
     if(self->last_state != state && self->last_state != RM_PROGRESS_STATE_INIT) {
         self->percent = 1.05;
-        if(state != RM_PROGRESS_STATE_PRE_SHUTDOWN) {
+        if(state != RM_PROGRESS_STATE_PRE_SHUTDOWN &&
+           state != RM_PROGRESS_STATE_PREPROCESS_DONE) {
             rm_fmt_progress_print_bar(session, self, self->terminal.ws_col * 0.3, out);
             fprintf(out, "\n");
         }
-        g_timer_start(self->timer);
         force_draw = true;
     }
 
     if(state == RM_PROGRESS_STATE_TRAVERSE && session->traverse_finished) {
-        g_timer_start(self->timer);
         force_draw = true;
     }
 
     if(state == RM_PROGRESS_STATE_SHREDDER && session->shredder_finished) {
-        g_timer_start(self->timer);
         force_draw = true;
     }
 

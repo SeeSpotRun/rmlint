@@ -679,7 +679,7 @@ static void rm_shred_counter_factory(RmCounterBuffer *buffer, RmShredTag *tag) {
     session->counters->shred_bytes_remaining += buffer->bytes;
     rm_fmt_set_state(session->formats, (tag->after_preprocess)
                                            ? RM_PROGRESS_STATE_SHREDDER
-                                           : RM_PROGRESS_STATE_PREPROCESS);
+                                           : RM_PROGRESS_STATE_PREPROCESS_DONE);
 
     /* fake interrupt option for debugging/testing: */
     if(tag->after_preprocess && session->cfg->fake_abort &&

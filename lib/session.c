@@ -194,6 +194,7 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
         /* collect "other lint" for later processing */
         session->tables->other_lint[file->lint_type] =
             g_slist_prepend(session->tables->other_lint[file->lint_type], file);
+        session->counters->total_filtered_files--;
         session->counters->other_lint_cnt++;
     }
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
@@ -293,7 +294,7 @@ int rm_session_run(RmSession *session) {
             g_timer_elapsed(session->timer, NULL));
 
         g_thread_pool_free(preprocess_file_pipe, FALSE, TRUE);
-        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS_DONE);
         rm_log_debug_line(
             "Preprocessing finished at %.3f with %d files; ignored %d hidden files and "
             "%d "

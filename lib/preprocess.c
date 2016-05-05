@@ -132,8 +132,7 @@ static bool rm_pp_handle_other_lint(RmFile *file, const RmPPSession *preprocesso
         /* "Other" lint protected by --keep-all-{un,}tagged */
         file->lint_type = RM_LINT_TYPE_KEEP_TAGGED;
     }
-    preprocessor->tables->other_lint[file->lint_type] =
-        g_slist_prepend(preprocessor->tables->other_lint[file->lint_type], file);
+    g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
     return TRUE;
 }
 

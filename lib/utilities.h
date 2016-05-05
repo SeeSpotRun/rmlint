@@ -183,13 +183,6 @@ int rm_util_uid_gid_check(RmStat *statp, RmUserList *userlist);
 bool rm_util_is_nonstripped(const char *path, RmStat *statp);
 
 /**
- * @brief Get the basename part of the file. It does not change filename.
- *
- * @return NULL on failure, the pointer after the last / on success.
- */
-char *rm_util_basename(const char *filename);
-
-/**
  * @brief Check if the file or any components of it are hidden.
  *
  * @return true if it is.
@@ -220,14 +213,6 @@ typedef gpointer (*RmNewFunc)(void);
  * @return value, which may be default_func() if key does not exist.
  */
 GQueue *rm_hash_table_setdefault(GHashTable *table, gpointer key, RmNewFunc default_func);
-
-/**
- * @brief Push all elements in `src` at the tail of `dst`
- *
- * @param dest The queue to append to.
- * @param src The queue to append from. Will be empty afterwards.
- */
-void rm_util_queue_push_tail_queue(GQueue *dest, GQueue *src);
 
 /**
  * @brief Function prototype for remove-iterating over a GQueue/GList/GSList.
@@ -294,11 +279,6 @@ gpointer rm_util_slist_pop(GSList **list, GMutex *lock);
  * @return: a pointer >= basename or NULL.
  */
 char *rm_util_path_extension(const char *basename);
-
-/**
- * @brief Get the inode of the directory of the file specified in path.
- */
-ino_t rm_util_parent_node(const char *path);
 
 /*
  * @brief Takes num and converts into some human readable string. 1024 -> 1KB

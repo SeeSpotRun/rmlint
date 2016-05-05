@@ -92,19 +92,6 @@ char *rm_util_strsub(const char *string, const char *subs, const char *with) {
     return result;
 }
 
-char *rm_util_basename(const char *filename) {
-    char *base = strrchr(filename, G_DIR_SEPARATOR);
-    if(base != NULL) {
-        /* Return a pointer to the part behind it
-         * (which may be the empty string)
-         * */
-        return base + 1;
-    }
-
-    /* It's the full path anyway */
-    return (char *)filename;
-}
-
 char *rm_util_path_extension(const char *basename) {
     char *point = strrchr(basename, '.');
     if(point) {
@@ -156,39 +143,6 @@ GQueue *rm_hash_table_setdefault(GHashTable *table, gpointer key,
     }
 
     return value;
-}
-
-ino_t rm_util_parent_node(const char *path) {
-    char *parent_path = g_path_get_dirname(path);
-
-    RmStat stat_buf;
-    if(!rm_sys_stat(parent_path, &stat_buf)) {
-        g_free(parent_path);
-        return stat_buf.st_ino;
-    } else {
-        g_free(parent_path);
-        return -1;
-    }
-}
-
-void rm_util_queue_push_tail_queue(GQueue *dest, GQueue *src) {
-    g_return_if_fail(dest);
-    g_return_if_fail(src);
-
-    if(src->length == 0) {
-        return;
-    }
-
-    src->head->prev = dest->tail;
-    if(dest->tail) {
-        dest->tail->next = src->head;
-    } else {
-        dest->head = src->head;
-    }
-    dest->tail = src->tail;
-    dest->length += src->length;
-    src->length = 0;
-    src->head = src->tail = NULL;
 }
 
 gint rm_util_queue_foreach_remove(GQueue *queue, RmRFunc func, gpointer user_data) {

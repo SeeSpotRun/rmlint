@@ -311,4 +311,40 @@ void rm_file_build_path(RmFile *file, char *buf);
  */
 gint rm_file_basenames_cmp(const RmFile *file_a, const RmFile *file_b);
 
+/**
+ * @brief Compare two files in order to find out which file is the
+ * higher ranked (ie original).
+ *
+ * Returns: -1 if a outranks b, 0 if a == b and +1 else.
+ */
+int rm_file_cmp_orig_criteria_pre(const RmFile *a, const RmFile *b, const RmCfg *cfg);
+
+/**
+ * @brief post-processing sorting of files by original criteria.
+ *
+ * This is slightly different to rm_shred_cmp_orig_criteria_pre in the case
+ * of either -K or -M options
+ */
+int rm_file_cmp_orig_criteria_post(RmFile *a, RmFile *b, RmCfg *cfg);
+
+/**
+ * @brief Rank two files in terms of size; if equal then rank in terms of
+ * cfg->match_... options.  A return of 0 implies file_a and file_b are
+ * duplicate candidates */
+gint rm_file_cmp_size_etc(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg);
+
+/**
+ * @brief Rank two files in terms of size, cfg->match_..., then originality
+ * duplicate candidates
+ */
+gint rm_file_cmp_full(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg);
+
+/**
+ * @brief Rank two files in terms of dev then inode
+ * @note used to help find inode matches
+ */
+gint rm_file_node_cmp(const RmFile *file_a, const RmFile *file_b);
+
+gint rm_session_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b);
+
 #endif /* end of include guard */

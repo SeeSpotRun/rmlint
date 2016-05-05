@@ -56,21 +56,15 @@ void rm_shred_run(RmSession *session);
  * - the is_original flag of the file,
  * - the is_prefd flag of the file
  * - otherwise sort by criteria
+ * TODO: move this out of shredder
  */
 void rm_shred_forward_to_output(RmSession *session, GQueue *group);
 
 /**
  * @brief Find the original file in a group and mark it.
+ * TODO: move this out of shredder
  */
 void rm_shred_group_find_original(RmSession *session, GQueue *group,
                                   RmShredGroupStatus status);
-
-/**
- * @brief post-processing sorting of files by criteria (-S and -[kmKM])
- *
- * This is slightly different to rm_shred_cmp_orig_criteria in the case of
- * either -K or -M options
- */
-int rm_shred_cmp_orig_criteria(RmFile *a, RmFile *b, RmSession *session);
 
 #endif

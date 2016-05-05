@@ -1166,28 +1166,6 @@ static void rm_shred_preprocess_input(RmShredTag *main) {
 //       POST PROCESSING       //
 /////////////////////////////////
 
-/* post-processing sorting of files by criteria (-S and -[kmKM]) this is
- * slightly different to rm_shred_cmp_orig_criteria in the case of either -K or
- * -M options
- */
-int rm_shred_cmp_orig_criteria(RmFile *a, RmFile *b, RmSession *session) {
-    RmCfg *cfg = session->cfg;
-
-    /* Make sure to *never* make a symlink to be the original */
-    if(a->is_symlink != b->is_symlink) {
-        return a->is_symlink - b->is_symlink;
-    } else if((a->is_prefd != b->is_prefd) &&
-              (cfg->keep_all_untagged || cfg->must_match_untagged)) {
-        return (a->is_prefd - b->is_prefd);
-    } else {
-        int comparasion = rm_pp_cmp_orig_criteria(a, b, session->cfg);
-        if(comparasion == 0) {
-            return b->is_original - a->is_original;
-        }
-
-        return comparasion;
-    }
-}
 /* Discard files with same basename as headfile.
  * (RmRFunc for rm_util_queue_foreach_remove).
  */
@@ -1249,7 +1227,7 @@ void rm_shred_group_find_original(RmSession *session, GQueue *files,
     }
 
     /* sort the unbundled group */
-    g_queue_sort(files, (GCompareDataFunc)rm_shred_cmp_orig_criteria, session);
+    g_queue_sort(files, (GCompareDataFunc)rm_file_cmp_orig_criteria_post, session->cfg);
 
     RmFile *headfile = files->head->data;
     if(!headfile->is_original && status == RM_SHRED_GROUP_FINISHING) {

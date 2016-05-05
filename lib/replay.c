@@ -346,23 +346,6 @@ static bool rm_parrot_check_types(RmCfg *cfg, RmFile *file) {
 //   GROUPWISE FIXES (SORT, FILTER, ...)   //
 /////////////////////////////////////////////
 
-/* RmHRFunc to remove file unless it has a twin in group */
-static int rm_parrot_fix_match_opts(RmFile *file, GQueue *group) {
-    int remove = 1;
-
-    for(GList *iter = group->head; iter; iter = iter->next) {
-        if(file != iter->data && rm_file_cmp(file, iter->data) == 0) {
-            remove = 0;
-            break;
-        }
-    }
-
-    if(remove) {
-        rm_file_destroy(file);
-    }
-    return remove;
-}
-
 static void rm_parrot_fix_must_match_tagged(RmParrotCage *cage, GQueue *group) {
     RmCfg *cfg = cage->session->cfg;
     if(!(cfg->must_match_tagged || cfg->must_match_untagged)) {
@@ -425,14 +408,31 @@ static void rm_parrot_write_group(RmParrotCage *cage, GQueue *group) {
 
     if(cfg->match_with_extension || cfg->match_without_extension || cfg->match_basename ||
        cfg->unmatched_basenames) {
-        /* This is probably a sucky way to do it, due to n^2,
-         * but I doubt that will make a large performance difference.
-         */
-        rm_util_queue_foreach_remove(group, (RmRFunc)rm_parrot_fix_match_opts, group);
+        /* Remove file unless it has a twin in group */
+        g_queue_sort(group, (GCompareDataFunc)rm_file_cmp_size_etc, cfg);
+        GList *next = NULL;
+        for(GList *iter = group->head; iter; iter = next) {
+            if(iter->next &&
+               rm_file_cmp_size_etc(iter->data, iter->next->data, cfg) == 0) {
+                /* save iter and iter->next */
+                next = iter->next->next;
+            } else if(iter->prev &&
+                      rm_file_cmp_size_etc(iter->data, iter->prev->data, cfg) == 0) {
+                /* save iter */
+                next = iter->next;
+            } else {
+                /* remove iter */
+                next = iter->next;
+                rm_file_destroy(iter->data);
+                g_queue_delete_link(group, iter);
+            }
+        }
     }
+
     rm_parrot_fix_must_match_tagged(cage, group);
 
-    g_queue_sort(group, (GCompareDataFunc)rm_shred_cmp_orig_criteria, cage->session);
+    g_queue_sort(group, (GCompareDataFunc)rm_file_cmp_orig_criteria_post,
+                 cage->session->cfg);
 
     for(GList *iter = group->head; iter; iter = iter->next) {
         RmFile *file = iter->data;

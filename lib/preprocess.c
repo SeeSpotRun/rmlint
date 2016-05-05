@@ -39,76 +39,6 @@ typedef struct RmPPSession {
     GThreadPool *preprocess_file_pipe;
 } RmPPSession;
 
-static gint rm_file_cmp_with_extension(const RmFile *file_a, const RmFile *file_b) {
-    char *ext_a = rm_util_path_extension(file_a->folder->basename);
-    char *ext_b = rm_util_path_extension(file_b->folder->basename);
-
-    if(ext_a && ext_b) {
-        return g_ascii_strcasecmp(ext_a, ext_b);
-    } else {
-        return (!!ext_a - !!ext_b);
-    }
-}
-
-static gint rm_file_cmp_without_extension(const RmFile *file_a, const RmFile *file_b) {
-    const char *basename_a = file_a->folder->basename;
-    const char *basename_b = file_b->folder->basename;
-
-    char *ext_a = rm_util_path_extension(basename_a);
-    char *ext_b = rm_util_path_extension(basename_b);
-
-    /* Check length till extension, or full length if none present */
-    size_t a_len = (ext_a) ? (ext_a - basename_a) : (int)strlen(basename_a);
-    size_t b_len = (ext_b) ? (ext_b - basename_b) : (int)strlen(basename_a);
-
-    if(a_len != b_len) {
-        return a_len - b_len;
-    }
-
-    return g_ascii_strncasecmp(basename_a, basename_b, a_len);
-}
-
-/* test if two files qualify for the same "group"; if not then rank them by
- * size and then other factors depending on settings */
-gint rm_file_cmp(const RmFile *file_a, const RmFile *file_b) {
-    gint result = SIGN_DIFF(file_a->file_size, file_b->file_size);
-
-    const RmCfg *const cfg = file_a->cfg;
-
-    if(result == 0) {
-        result = (cfg->match_basename) ? rm_file_basenames_cmp(file_a, file_b) : 0;
-    }
-
-    if(result == 0) {
-        result =
-            (cfg->match_with_extension) ? rm_file_cmp_with_extension(file_a, file_b) : 0;
-    }
-
-    if(result == 0) {
-        result = (cfg->match_without_extension)
-                     ? rm_file_cmp_without_extension(file_a, file_b)
-                     : 0;
-    }
-
-    return result;
-}
-
-gint rm_file_cmp_full(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
-    gint result = rm_file_cmp(file_a, file_b);
-    if(result != 0) {
-        return result;
-    }
-    return rm_pp_cmp_orig_criteria(file_a, file_b, cfg);
-}
-
-static int rm_node_cmp(const RmFile *file_a, const RmFile *file_b) {
-    gint result = SIGN_DIFF(file_a->dev, file_b->dev);
-    if(result == 0) {
-        return SIGN_DIFF(file_a->inode, file_b->inode);
-    }
-    return result;
-}
-
 /* GHashTable key tuned to recognize duplicate paths.
  * i.e. RmFiles that are not only hardlinks but
  * also point to the real path
@@ -186,106 +116,6 @@ void rm_file_tables_destroy(RmFileTables *tables) {
 
     g_mutex_clear(&tables->lock);
     g_slice_free(RmFileTables, tables);
-}
-
-static int rm_pp_cmp_by_regex(GRegex *regex, int idx, RmPatternBitmask *mask_a,
-                              const char *path_a, RmPatternBitmask *mask_b,
-                              const char *path_b) {
-    int result = 0;
-
-    if(RM_PATTERN_IS_CACHED(mask_a, idx)) {
-        /* Get the previous match result */
-        result = RM_PATTERN_GET_CACHED(mask_a, idx);
-    } else {
-        /* Match for the first time */
-        result = g_regex_match(regex, path_a, 0, NULL);
-        RM_PATTERN_SET_CACHED(mask_a, idx, result);
-    }
-
-    if(result) {
-        return -1;
-    }
-
-    if(RM_PATTERN_IS_CACHED(mask_b, idx)) {
-        /* Get the previous match result */
-        result = RM_PATTERN_GET_CACHED(mask_b, idx);
-    } else {
-        /* Match for the first time */
-        result = g_regex_match(regex, path_b, 0, NULL);
-        RM_PATTERN_SET_CACHED(mask_b, idx, result);
-    }
-
-    if(result) {
-        return +1;
-    }
-
-    /* Both match or none of the both match */
-    return 0;
-}
-
-/* Sort criteria for sorting by preferred path (first) then user-input criteria */
-/* Return:
- *      a negative integer file 'a' outranks 'b',
- *      0 if they are equal,
- *      a positive integer if file 'b' outranks 'a'
- */
-int rm_pp_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmCfg *cfg) {
-    if(a->lint_type != b->lint_type) {
-        /* "other" lint outranks duplicates and has lower ENUM */
-        return a->lint_type - b->lint_type;
-    } else if(a->is_symlink != b->is_symlink) {
-        return a->is_symlink - b->is_symlink;
-    } else if(a->is_prefd != b->is_prefd) {
-        return (b->is_prefd - a->is_prefd);
-    } else {
-        /* Only fill in path if we have a pattern in sort_criteria */
-        bool path_needed = (cfg->pattern_cache->len > 0);
-        RM_DEFINE_PATH_IF_NEEDED(a, path_needed);
-        RM_DEFINE_PATH_IF_NEEDED(b, path_needed);
-
-        for(int i = 0, regex_cursor = 0; cfg->sort_criteria[i]; i++) {
-            long cmp = 0;
-            switch(tolower((unsigned char)cfg->sort_criteria[i])) {
-            case 'm':
-                cmp = (long)(a->mtime) - (long)(b->mtime);
-                break;
-            case 'a':
-                cmp = g_ascii_strcasecmp(a->folder->basename, b->folder->basename);
-                break;
-            case 'l':
-                cmp = strlen(a->folder->basename) - strlen(b->folder->basename);
-                break;
-            case 'd':
-                cmp = (short)a->depth - (short)b->depth;
-                break;
-            case 'p':
-                cmp = (long)a->path_index - (long)b->path_index;
-                break;
-            case 'x': {
-                cmp = rm_pp_cmp_by_regex(
-                    g_ptr_array_index(cfg->pattern_cache, regex_cursor), regex_cursor,
-                    (RmPatternBitmask *)&a->pattern_bitmask_basename, a->folder->basename,
-                    (RmPatternBitmask *)&b->pattern_bitmask_basename,
-                    b->folder->basename);
-                regex_cursor++;
-                break;
-            }
-            case 'r':
-                cmp = rm_pp_cmp_by_regex(
-                    g_ptr_array_index(cfg->pattern_cache, regex_cursor), regex_cursor,
-                    (RmPatternBitmask *)&a->pattern_bitmask_path, a_path,
-                    (RmPatternBitmask *)&b->pattern_bitmask_path, b_path);
-                regex_cursor++;
-                break;
-            }
-            if(cmp) {
-                /* reverse order if uppercase option */
-                cmp = cmp * (isupper((unsigned char)cfg->sort_criteria[i]) ? -1 : +1);
-                return cmp;
-            }
-        }
-        return 0;
-    }
 }
 
 /* if file is not DUPE_CANDIDATE then send it to session->tables->other_lint and
@@ -397,11 +227,11 @@ static GSList *rm_preprocess_size_group(GSList *head, RmPPSession *preprocessor)
     /* sort by inode so we can identify inode clusters; this is faster
      * and lighter than hashtable approach */
     GSList *result = NULL;
-    head = g_slist_sort(head, (GCompareFunc)rm_node_cmp);
+    head = g_slist_sort(head, (GCompareFunc)rm_file_node_cmp);
     GSList *next = NULL;
     for(GSList *iter = head; iter; iter = next) {
         next = iter->next;
-        if(!next || rm_node_cmp(iter->data, next->data) != 0) {
+        if(!next || rm_file_node_cmp(iter->data, next->data) != 0) {
             /* next inode found; split the list */
             iter->next = NULL;
             /* process head...iter to remove lint and bundle hardlinks */
@@ -443,7 +273,7 @@ void rm_preprocess(const RmCfg *cfg, RmFileTables *tables,
     GSList *next = NULL;
     for(GSList *iter = tables->all_files; iter; iter = next) {
         next = iter->next;
-        if(!next || rm_file_cmp(iter->data, next->data) != 0) {
+        if(!next || rm_file_cmp_size_etc(iter->data, next->data, (gpointer)cfg) != 0) {
             /* split list and process size group*/
             if(rm_session_was_aborted()) {
                 break;

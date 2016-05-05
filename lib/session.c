@@ -199,12 +199,6 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
 }
 
-static int rm_session_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b) {
-    RM_DEFINE_PATH(a);
-    RM_DEFINE_PATH(b);
-    return g_strcmp0(b_path, a_path);
-}
-
 static void rm_session_output_other_lint(const RmSession *session) {
     RmFileTables *tables = session->tables;
 

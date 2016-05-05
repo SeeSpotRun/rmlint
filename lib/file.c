@@ -30,6 +30,8 @@
 #include <unistd.h>
 #include <sys/file.h>
 #include <string.h>
+#include <stdio.h>
+#include <ctype.h>
 
 RmFile *rm_file_new(RmCfg *cfg, const char *path, RmStat *statp, RmLintType type,
                     bool is_ppath, unsigned path_index, short depth) {
@@ -144,6 +146,195 @@ RmLintType rm_file_string_to_lint_type(const char *type) {
     return RM_LINT_TYPE_UNKNOWN;
 }
 
+static gint rm_file_cmp_with_extension(const RmFile *file_a, const RmFile *file_b) {
+    char *ext_a = rm_util_path_extension(file_a->folder->basename);
+    char *ext_b = rm_util_path_extension(file_b->folder->basename);
+
+    if(ext_a && ext_b) {
+        return g_ascii_strcasecmp(ext_a, ext_b);
+    } else {
+        return (!!ext_a - !!ext_b);
+    }
+}
+
+static gint rm_file_cmp_without_extension(const RmFile *file_a, const RmFile *file_b) {
+    const char *basename_a = file_a->folder->basename;
+    const char *basename_b = file_b->folder->basename;
+
+    char *ext_a = rm_util_path_extension(basename_a);
+    char *ext_b = rm_util_path_extension(basename_b);
+
+    /* Check length till extension, or full length if none present */
+    size_t a_len = (ext_a) ? (ext_a - basename_a) : (int)strlen(basename_a);
+    size_t b_len = (ext_b) ? (ext_b - basename_b) : (int)strlen(basename_a);
+
+    if(a_len != b_len) {
+        return a_len - b_len;
+    }
+
+    return g_ascii_strncasecmp(basename_a, basename_b, a_len);
+}
+
+static int rm_pp_cmp_by_regex(GRegex *regex, int idx, RmPatternBitmask *mask_a,
+                              const char *path_a, RmPatternBitmask *mask_b,
+                              const char *path_b) {
+    int result = 0;
+
+    if(RM_PATTERN_IS_CACHED(mask_a, idx)) {
+        /* Get the previous match result */
+        result = RM_PATTERN_GET_CACHED(mask_a, idx);
+    } else {
+        /* Match for the first time */
+        result = g_regex_match(regex, path_a, 0, NULL);
+        RM_PATTERN_SET_CACHED(mask_a, idx, result);
+    }
+
+    if(result) {
+        return -1;
+    }
+
+    if(RM_PATTERN_IS_CACHED(mask_b, idx)) {
+        /* Get the previous match result */
+        result = RM_PATTERN_GET_CACHED(mask_b, idx);
+    } else {
+        /* Match for the first time */
+        result = g_regex_match(regex, path_b, 0, NULL);
+        RM_PATTERN_SET_CACHED(mask_b, idx, result);
+    }
+
+    if(result) {
+        return +1;
+    }
+
+    /* Both match or none of the both match */
+    return 0;
+}
+
 gint rm_file_basenames_cmp(const RmFile *file_a, const RmFile *file_b) {
     return g_ascii_strcasecmp(file_a->folder->basename, file_b->folder->basename);
+}
+
+/* Sort criteria for sorting during preprocessing;
+ * Return:
+ *      a negative integer file 'a' outranks 'b',
+ *      0 if they are equal,
+ *      a positive integer if file 'b' outranks 'a'
+ */
+int rm_file_cmp_orig_criteria_pre(const RmFile *a, const RmFile *b, const RmCfg *cfg) {
+    if(a->lint_type != b->lint_type) {
+        /* "other" lint outranks duplicates and has lower ENUM */
+        return a->lint_type - b->lint_type;
+    } else if(a->is_symlink != b->is_symlink) {
+        return a->is_symlink - b->is_symlink;
+    } else if(a->is_prefd != b->is_prefd) {
+        return (b->is_prefd - a->is_prefd);
+    } else {
+        /* Only fill in path if we have a pattern in sort_criteria */
+        bool path_needed = (cfg->pattern_cache->len > 0);
+        RM_DEFINE_PATH_IF_NEEDED(a, path_needed);
+        RM_DEFINE_PATH_IF_NEEDED(b, path_needed);
+
+        for(int i = 0, regex_cursor = 0; cfg->sort_criteria[i]; i++) {
+            long cmp = 0;
+            switch(tolower((unsigned char)cfg->sort_criteria[i])) {
+            case 'm':
+                cmp = (long)(a->mtime) - (long)(b->mtime);
+                break;
+            case 'a':
+                cmp = g_ascii_strcasecmp(a->folder->basename, b->folder->basename);
+                break;
+            case 'l':
+                cmp = strlen(a->folder->basename) - strlen(b->folder->basename);
+                break;
+            case 'd':
+                cmp = (short)a->depth - (short)b->depth;
+                break;
+            case 'p':
+                cmp = (long)a->path_index - (long)b->path_index;
+                break;
+            case 'x': {
+                cmp = rm_pp_cmp_by_regex(
+                    g_ptr_array_index(cfg->pattern_cache, regex_cursor), regex_cursor,
+                    (RmPatternBitmask *)&a->pattern_bitmask_basename, a->folder->basename,
+                    (RmPatternBitmask *)&b->pattern_bitmask_basename,
+                    b->folder->basename);
+                regex_cursor++;
+                break;
+            }
+            case 'r':
+                cmp = rm_pp_cmp_by_regex(
+                    g_ptr_array_index(cfg->pattern_cache, regex_cursor), regex_cursor,
+                    (RmPatternBitmask *)&a->pattern_bitmask_path, a_path,
+                    (RmPatternBitmask *)&b->pattern_bitmask_path, b_path);
+                regex_cursor++;
+                break;
+            }
+            if(cmp) {
+                /* reverse order if uppercase option */
+                cmp = cmp * (isupper((unsigned char)cfg->sort_criteria[i]) ? -1 : +1);
+                return cmp;
+            }
+        }
+        return 0;
+    }
+}
+
+int rm_file_cmp_orig_criteria_post(RmFile *a, RmFile *b, RmCfg *cfg) {
+    /* Make sure to *never* make a symlink to be the original */
+    if(a->is_symlink != b->is_symlink) {
+        return a->is_symlink - b->is_symlink;
+    } else if((a->is_prefd != b->is_prefd) &&
+              (cfg->keep_all_untagged || cfg->must_match_untagged)) {
+        return (a->is_prefd - b->is_prefd);
+    } else {
+        int comparison = rm_file_cmp_orig_criteria_pre(a, b, cfg);
+        if(comparison == 0) {
+            return b->is_original - a->is_original;
+        }
+
+        return comparison;
+    }
+}
+
+gint rm_file_cmp_size_etc(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
+    gint result = SIGN_DIFF(file_a->file_size, file_b->file_size);
+
+    if(result == 0) {
+        result = (cfg->match_basename) ? rm_file_basenames_cmp(file_a, file_b) : 0;
+    }
+
+    if(result == 0) {
+        result =
+            (cfg->match_with_extension) ? rm_file_cmp_with_extension(file_a, file_b) : 0;
+    }
+
+    if(result == 0) {
+        result = (cfg->match_without_extension)
+                     ? rm_file_cmp_without_extension(file_a, file_b)
+                     : 0;
+    }
+
+    return result;
+}
+
+gint rm_file_cmp_full(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
+    gint result = rm_file_cmp_size_etc(file_a, file_b, cfg);
+    if(result != 0) {
+        return result;
+    }
+    return rm_file_cmp_orig_criteria_pre(file_a, file_b, cfg);
+}
+
+gint rm_file_node_cmp(const RmFile *file_a, const RmFile *file_b) {
+    gint result = SIGN_DIFF(file_a->dev, file_b->dev);
+    if(result == 0) {
+        return SIGN_DIFF(file_a->inode, file_b->inode);
+    }
+    return result;
+}
+
+gint rm_session_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b) {
+    RM_DEFINE_PATH(a);
+    RM_DEFINE_PATH(b);
+    return g_strcmp0(b_path, a_path);
 }

@@ -33,7 +33,7 @@
 #include <stdio.h>
 #include <ctype.h>
 
-RmFile *rm_file_new(RmCfg *cfg, const char *path, RmStat *statp, RmLintType type,
+RmFile *rm_file_new(const RmCfg *cfg, const char *path, RmStat *statp, RmLintType type,
                     bool is_ppath, unsigned path_index, short depth) {
     RmOff actual_file_size = statp->st_size;
     RmOff start_seek = 0;

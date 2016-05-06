@@ -271,7 +271,7 @@ typedef struct RmFile {
 /**
  * @brief Create a new RmFile handle.
  */
-RmFile *rm_file_new(RmCfg *cfg, const char *path, RmStat *statp, RmLintType type,
+RmFile *rm_file_new(const RmCfg *cfg, const char *path, RmStat *statp, RmLintType type,
                     bool is_ppath, unsigned pnum, short depth);
 
 /**

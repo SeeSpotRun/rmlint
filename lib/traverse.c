@@ -41,7 +41,7 @@ typedef struct RmTravBuffer {
     RmMDSDevice *disk; /* md-scheduler device the buffer was pushed to */
 } RmTravBuffer;
 
-static RmTravBuffer *rm_trav_buffer_new(RmCfg *cfg, char *path, bool is_prefd,
+static RmTravBuffer *rm_trav_buffer_new(const RmCfg *cfg, char *path, bool is_prefd,
                                         unsigned long path_index) {
     RmTravBuffer *self = g_new0(RmTravBuffer, 1);
     self->path = path;
@@ -70,16 +70,19 @@ static void rm_trav_buffer_free(RmTravBuffer *self) {
 //////////////////////
 
 typedef struct RmTravSession {
+    const RmCfg *cfg;
     RmUserList *userlist;
-    RmCfg *cfg;
     GThreadPool *file_pool;
+    GHashTable *roots;
 } RmTravSession;
 
-static RmTravSession *rm_traverse_session_new(RmCfg *cfg, GThreadPool *file_pool) {
+static RmTravSession *rm_traverse_session_new(const RmCfg *cfg, GThreadPool *file_pool,
+                                              GHashTable *roots) {
     RmTravSession *self = g_new0(RmTravSession, 1);
     self->cfg = cfg;
     self->file_pool = file_pool;
     self->userlist = rm_userlist_new();
+    self->roots = roots;
     return self;
 }
 
@@ -96,7 +99,7 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
                              bool is_prefd, unsigned long path_index,
                              RmLintType file_type, bool is_symlink, bool is_hidden,
                              bool is_on_subvol_fs, short depth) {
-    RmCfg *cfg = traverser->cfg;
+    const RmCfg *cfg = traverser->cfg;
 
     /* Try to autodetect the type of the lint */
     if(file_type == RM_LINT_TYPE_UNKNOWN) {
@@ -134,7 +137,7 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
     }
 }
 
-static bool rm_traverse_is_hidden(RmCfg *cfg, const char *basename, char *hierarchy,
+static bool rm_traverse_is_hidden(const RmCfg *cfg, const char *basename, char *hierarchy,
                                   size_t hierarchy_len) {
     if(cfg->partial_hidden == false) {
         return false;
@@ -193,7 +196,7 @@ static void rm_traverse_convert_small_stat_buf(struct stat *fts_statp, RmStat *b
 #endif
 
 static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser) {
-    RmCfg *cfg = traverser->cfg;
+    const RmCfg *cfg = traverser->cfg;
 
     char is_prefd = buffer->is_prefd;
     RmOff path_index = buffer->path_index;
@@ -248,26 +251,30 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser
         } else {
             switch(p->fts_info) {
             case FTS_D: /* preorder directory */
-                if(cfg->depth != 0 && p->fts_level >= cfg->depth) {
+                if(cfg->depth == 0 || p->fts_level >= cfg->depth) {
                     /* continuing into folder would exceed maxdepth*/
-                    fts_set(ftsp, p, FTS_SKIP);  /* do not recurse */
-                    clear_emptydir_flags = true; /* flag current dir as not empty */
                     rm_log_debug_line("Not descending into %s because max depth reached",
                                       p->fts_path);
-                } else if(!(cfg->crossdev) && p->fts_dev != chp->fts_dev) {
+                } else if(p->fts_level > 0 && !(cfg->crossdev) &&
+                          p->fts_dev != chp->fts_dev) {
                     /* continuing into folder would cross file systems*/
-                    fts_set(ftsp, p, FTS_SKIP);  /* do not recurse */
-                    clear_emptydir_flags = true; /*flag current dir as not empty*/
                     rm_log_info(
                         "Not descending into %s because it is a different filesystem\n",
                         p->fts_path);
+                } else if(p->fts_level > 0 &&
+                          g_hash_table_contains(traverser->roots, p->fts_path)) {
+                    rm_log_info("Not descending into %s because it is a root path\n",
+                                p->fts_path);
                 } else {
                     /* recurse dir; assume empty until proven otherwise */
                     is_emptydir[p->fts_level + 1] = 1;
                     is_hidden[p->fts_level + 1] =
                         is_hidden[p->fts_level] | (p->fts_name[0] == '.');
                     have_open_emptydirs = true;
+                    break;
                 }
+                fts_set(ftsp, p, FTS_SKIP);  /* do not recurse */
+                clear_emptydir_flags = true; /* flag current dir as not empty */
                 break;
             case FTS_DC: /* directory that causes cycles */
                 rm_log_warning_line(_("filesystem loop detected at %s (skipping)"),
@@ -403,21 +410,32 @@ done:
 // PUBLIC API //
 ////////////////
 
-void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
+void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
     rm_assert_gentle(cfg);
     rm_assert_gentle(mds);
 
-    RmTravSession *traverser = rm_traverse_session_new(cfg, file_pool);
+    /* hashtable to prevent traversing into other roots */
+    RmTravBuffer *buffer;
+    GHashTable *roots = g_hash_table_new(g_str_hash, g_str_equal);
+    for(guint idx = 0; cfg->paths[idx] != NULL; ++idx) {
+        buffer = g_hash_table_lookup(roots, cfg->paths[idx]);
+        if(buffer) {
+            rm_trav_buffer_free(buffer);
+        }
+        bool is_prefd = (idx >= cfg->first_prefd);
+        buffer = rm_trav_buffer_new(cfg, cfg->paths[idx], is_prefd, idx);
+        g_hash_table_insert(roots, cfg->paths[idx], buffer);
+    }
+
+    RmTravSession *traverser = rm_traverse_session_new(cfg, file_pool, roots);
 
     rm_mds_configure(mds, (RmMDSFunc)rm_traverse_directory, traverser, 0,
                      cfg->threads_per_disk, NULL);
 
-    for(guint idx = 0; cfg->paths[idx] != NULL && !rm_session_was_aborted(); ++idx) {
-        char *path = cfg->paths[idx];
-        bool is_prefd = idx >= cfg->first_prefd;
-
-        RmTravBuffer *buffer = rm_trav_buffer_new(cfg, path, is_prefd, idx);
-
+    GHashTableIter iter;
+    char *path;
+    g_hash_table_iter_init(&iter, roots);
+    while(g_hash_table_iter_next(&iter, (gpointer *)&path, (gpointer *)&buffer)) {
         if(S_ISREG(buffer->stat_buf.st_mode)) {
             /* Append normal paths directly */
             bool is_hidden = false;
@@ -427,15 +445,17 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
                 is_hidden = rm_util_path_is_hidden(buffer->path);
             }
 
-            rm_traverse_file(traverser, &buffer->stat_buf, buffer->path, is_prefd, idx,
-                             RM_LINT_TYPE_UNKNOWN, false, is_hidden, FALSE, 0);
+            rm_traverse_file(traverser, &buffer->stat_buf, buffer->path, buffer->is_prefd,
+                             buffer->path_index, RM_LINT_TYPE_UNKNOWN, false, is_hidden,
+                             FALSE, 0);
 
             rm_trav_buffer_free(buffer);
         } else if(S_ISDIR(buffer->stat_buf.st_mode)) {
             /* It's a directory, traverse it. */
-            buffer->disk = rm_mds_device_get(
-                mds, buffer->path,
-                (cfg->fake_pathindex_as_disk) ? idx + 1 : buffer->stat_buf.st_dev);
+            buffer->disk =
+                rm_mds_device_get(mds, buffer->path, (cfg->fake_pathindex_as_disk)
+                                                         ? buffer->path_index + 1
+                                                         : buffer->stat_buf.st_dev);
             rm_mds_device_ref(buffer->disk, 1);
             rm_mds_push_task(buffer->disk, buffer->stat_buf.st_dev, 0, buffer->path,
                              buffer);
@@ -447,6 +467,8 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
     }
     rm_mds_start(mds);
     rm_mds_finish(mds);
+
+    g_hash_table_unref(roots);
 
     rm_traverse_session_free(traverser);
 }

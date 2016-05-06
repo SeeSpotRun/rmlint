@@ -295,6 +295,7 @@ typedef struct RmMountTable {
     GHashTable *nfs_table;
     GHashTable *evilfs_table;
     GHashTable *reflinkfs_table;
+    GMutex lock;
 } RmMountTable;
 
 /**

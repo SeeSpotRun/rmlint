@@ -756,6 +756,7 @@ static bool rm_mounts_create_tables(RmMountTable *self, bool force_fiemap) {
 
 RmMountTable *rm_mounts_table_new(bool force_fiemap) {
     RmMountTable *self = g_slice_new(RmMountTable);
+    g_mutex_init(&self->lock);
     if(rm_mounts_create_tables(self, force_fiemap) == false) {
         g_slice_free(RmMountTable, self);
         return NULL;
@@ -770,6 +771,7 @@ void rm_mounts_table_destroy(RmMountTable *self) {
     g_hash_table_unref(self->nfs_table);
     g_hash_table_unref(self->evilfs_table);
     g_hash_table_unref(self->reflinkfs_table);
+    g_mutex_clear(&self->lock);
     g_slice_free(RmMountTable, self);
 }
 
@@ -814,49 +816,58 @@ dev_t rm_mounts_get_disk_id(RmMountTable *self, _UNUSED dev_t dev,
     }
 
 #if RM_MOUNTTABLE_IS_USABLE
+    dev_t result = 0;
+    g_mutex_lock(&self->lock);
+    {
+        RmPartitionInfo *part =
+            g_hash_table_lookup(self->part_table, GINT_TO_POINTER(dev));
+        if(part) {
+            result = part->disk;
+        } else {
+            /* probably a btrfs subvolume which is not a mountpoint; walk up tree until we
+             * get to a recognisable partition */
+            char *prev = g_strdup(path);
+            while(TRUE) {
+                char *temp = g_strdup(prev);
+                char *parent_path = g_strdup(dirname(temp));
+                g_free(temp);
 
-    RmPartitionInfo *part = g_hash_table_lookup(self->part_table, GINT_TO_POINTER(dev));
-    if(part) {
-        return part->disk;
-    } else {
-        /* probably a btrfs subvolume which is not a mountpoint; walk up tree until we get
-         * to a recognisable partition */
-        char *prev = g_strdup(path);
-        while(TRUE) {
-            char *temp = g_strdup(prev);
-            char *parent_path = g_strdup(dirname(temp));
-            g_free(temp);
-
-            RmStat stat_buf;
-            if(!rm_sys_stat(parent_path, &stat_buf)) {
-                RmPartitionInfo *parent_part = g_hash_table_lookup(
-                    self->part_table, GINT_TO_POINTER(stat_buf.st_dev));
-                if(parent_part) {
-                    /* create new partition table entry for dev pointing to parent_part*/
-                    rm_log_debug_line("Adding partition info for " GREEN "%s" RESET
-                                      " - looks like subvolume %s on volume " GREEN
-                                      "%s" RESET,
-                                      path, prev, parent_part->name);
-                    part = rm_part_info_new(prev, parent_part->fsname, parent_part->disk);
-                    g_hash_table_insert(self->part_table, GINT_TO_POINTER(dev), part);
-                    /* if parent_part is in the reflinkfs_table, add dev as well */
-                    char *parent_type = g_hash_table_lookup(
-                        self->reflinkfs_table, GUINT_TO_POINTER(stat_buf.st_dev));
-                    if(parent_type) {
-                        g_hash_table_insert(self->reflinkfs_table, GUINT_TO_POINTER(dev),
-                                            parent_type);
+                RmStat stat_buf;
+                if(!rm_sys_stat(parent_path, &stat_buf)) {
+                    RmPartitionInfo *parent_part = g_hash_table_lookup(
+                        self->part_table, GINT_TO_POINTER(stat_buf.st_dev));
+                    if(parent_part) {
+                        /* create new partition table entry for dev pointing to
+                         * parent_part*/
+                        rm_log_debug_line("Adding partition info for " GREEN "%s" RESET
+                                          " - looks like subvolume %s on volume " GREEN
+                                          "%s" RESET,
+                                          path, prev, parent_part->name);
+                        part = rm_part_info_new(prev, parent_part->fsname,
+                                                parent_part->disk);
+                        g_hash_table_insert(self->part_table, GINT_TO_POINTER(dev), part);
+                        /* if parent_part is in the reflinkfs_table, add dev as well */
+                        char *parent_type = g_hash_table_lookup(
+                            self->reflinkfs_table, GUINT_TO_POINTER(stat_buf.st_dev));
+                        if(parent_type) {
+                            g_hash_table_insert(self->reflinkfs_table,
+                                                GUINT_TO_POINTER(dev), parent_type);
+                        }
+                        g_free(prev);
+                        g_free(parent_path);
+                        result = parent_part->disk;
+                        break;
                     }
-                    g_free(prev);
-                    g_free(parent_path);
-                    return parent_part->disk;
                 }
+                g_free(prev);
+                prev = parent_path;
+                rm_assert_gentle(strcmp(prev, "/") != 0);
+                rm_assert_gentle(strcmp(prev, ".") != 0);
             }
-            g_free(prev);
-            prev = parent_path;
-            rm_assert_gentle(strcmp(prev, "/") != 0);
-            rm_assert_gentle(strcmp(prev, ".") != 0);
         }
     }
+    g_mutex_unlock(&self->lock);
+    return result;
 #else
     (void)dev;
     (void)path;

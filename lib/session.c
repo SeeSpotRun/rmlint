@@ -187,6 +187,7 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
     } else if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
         session->counters->total_filtered_files--;
         rm_fmt_write(file, session->formats, 1);
+        rm_file_destroy(file);
     } else if(file->lint_type >= RM_LINT_TYPE_OTHER) {
         rm_assert_gentle(file->lint_type <= RM_LINT_TYPE_DUPE_CANDIDATE);
         /* filtered reject based on mtime, --keep, etc */

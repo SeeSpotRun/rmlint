@@ -333,7 +333,7 @@ gint rm_file_node_cmp(const RmFile *file_a, const RmFile *file_b) {
     return result;
 }
 
-gint rm_session_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b) {
+gint rm_file_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b) {
     RM_DEFINE_PATH(a);
     RM_DEFINE_PATH(b);
     return g_strcmp0(b_path, a_path);

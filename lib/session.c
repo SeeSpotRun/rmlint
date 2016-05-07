@@ -215,9 +215,8 @@ static void rm_session_output_other_lint(const RmSession *session) {
     for(RmOff type = 0; type < RM_LINT_TYPE_OTHER; ++type) {
         if(type == RM_LINT_TYPE_EMPTY_DIR) {
             /* sort empty dirs in reverse so that they can be deleted sequentially */
-            tables->other_lint[type] =
-                g_slist_sort(tables->other_lint[type],
-                             (GCompareFunc)rm_session_cmp_reverse_alphabetical);
+            tables->other_lint[type] = g_slist_sort(
+                tables->other_lint[type], (GCompareFunc)rm_file_cmp_reverse_alphabetical);
         }
 
         GSList *list = tables->other_lint[type];

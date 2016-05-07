@@ -347,6 +347,10 @@ gint rm_file_cmp_full(const RmFile *file_a, const RmFile *file_b, const RmCfg *c
  */
 gint rm_file_node_cmp(const RmFile *file_a, const RmFile *file_b);
 
-gint rm_session_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b);
+/**
+ * @brief Rank two files in reverse alphabetical order
+ * @note used to help find inode matches
+ */
+gint rm_file_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b);
 
 #endif /* end of include guard */

@@ -339,6 +339,17 @@ gint rm_file_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b) {
     return g_strcmp0(b_path, a_path);
 }
 
+static ino_t *rm_file_parent_inode(RmFile *file) {
+    ino_t *result = g_slice_new(ino_t);
+    char parent_path[PATH_MAX];
+    rm_trie_build_path((RmTrie *)&file->cfg->file_trie, file->folder->parent, parent_path, PATH_MAX);
+    RmStat stat_buf;
+    int retval = rm_sys_stat(parent_path, &stat_buf);
+    rm_assert_gentle(retval != -1);
+    *result = stat_buf.st_ino;
+    return result;
+}
+
 gint rm_file_cmp_pathdouble(RmFile *a, RmFile *b) {
     rm_assert_gentle(a->dev == b->dev);
     rm_assert_gentle(a->inode == b->inode);
@@ -360,27 +371,17 @@ gint rm_file_cmp_pathdouble(RmFile *a, RmFile *b) {
         return 0;
     }
 
-    /* final test is to compare parent folder dev & inodes; this will detect
-     * for example the same file in two different mountpoints.  To get parent
-     * inodes we first build the parent paths and then stat them.
-     * Some speedup options include storing this data in the pathtricia tree
-     * during traversal
+    /* final test is to compare parent folder inodes; this will detect
+     * when the same device is mounted to two different mountpoints.  To
+     * speed things up the inode data is cached in the pathtricia tree.
      */
-    char parent_path[PATH_MAX];
-    rm_trie_build_path((RmTrie *)&a->cfg->file_trie, pa, parent_path, PATH_MAX);
-    RmStat stat_buf_a;
-    int retval = rm_sys_stat(parent_path, &stat_buf_a);
-    rm_assert_gentle(retval != -1);
-
-    rm_trie_build_path((RmTrie *)&b->cfg->file_trie, pb, parent_path, PATH_MAX);
-    RmStat stat_buf_b;
-    retval = rm_sys_stat(parent_path, &stat_buf_b);
-    rm_assert_gentle(retval != -1);
-
-    result = SIGN_DIFF(stat_buf_a.st_dev, stat_buf_b.st_dev);
-    if(result != 0) {
-        /* should probably never happen since a and be are on same dev */
-        return result;
+    if (pa->data == NULL) {
+        pa->data = rm_file_parent_inode(a);
     }
-    return SIGN_DIFF(stat_buf_a.st_ino, stat_buf_b.st_ino);
+
+    if (pb->data == NULL) {
+        pb->data = rm_file_parent_inode(b);
+    }
+    rm_log_debug_line("Path double inode check: %lu vs %lu", *(ino_t *)pa->data, *(ino_t *)pb->data);
+    return SIGN_DIFF(*(ino_t *)pa->data, *(ino_t *)pb->data);
 }

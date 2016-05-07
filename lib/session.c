@@ -187,7 +187,9 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
     } else if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
         session->counters->total_filtered_files--;
         rm_fmt_write(file, session->formats, 1);
-        rm_file_destroy(file);
+        if(!session->cfg->cache_file_structs) {
+            rm_file_destroy(file);
+        }
     } else if(file->lint_type >= RM_LINT_TYPE_OTHER) {
         rm_assert_gentle(file->lint_type <= RM_LINT_TYPE_DUPE_CANDIDATE);
         /* filtered reject based on mtime, --keep, etc */
@@ -203,6 +205,10 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
 }
 
+/* after preprocessing, rm_session_output_other_lint sends the accumulated
+ * "other" lint files to the output formatters
+ * TODO: maybe move this to formats.c?
+ */
 static void rm_session_output_other_lint(const RmSession *session) {
     RmFileTables *tables = session->tables;
 
@@ -230,6 +236,82 @@ static void rm_session_output_other_lint(const RmSession *session) {
             g_slist_free(list);
         }
     }
+}
+
+static void rm_session_output_group(GQueue *files, RmSession *session, bool merge) {
+    for(GList *iter = files->head; iter; iter = iter->next) {
+        RmFile *file = iter->data;
+        if(merge) {
+            rm_tm_feed(session->dir_merger, file);
+        } else {
+            /* Hand it over to the printing module */
+            if(file->lint_type != RM_LINT_TYPE_READ_ERROR &&
+               file->lint_type != RM_LINT_TYPE_BASENAME_TWIN) {
+                /* TODO: revisit desired output for RM_LINT_TYPE_READ_ERROR and
+                 * RM_LINT_TYPE_BASENAME_TWIN */
+                rm_fmt_write(file, session->formats, files->length);
+            }
+        }
+    }
+    if(!session->cfg->cache_file_structs) {
+        RmFile *head = files->head->data;
+        if(head->digest) {
+            rm_digest_free(head->digest);
+        }
+        g_queue_free_full(files, (GDestroyNotify)rm_file_destroy);
+    } else {
+        g_queue_free(files);
+    }
+}
+
+/* threadpipe to receive duplicate files from treemerge
+ */
+static void rm_session_merge_pipe(GQueue *files, RmSession *session) {
+    rm_session_output_group(files, session, FALSE);
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
+}
+
+/* threadpipe to receive duplicate files and progress updates from shredder
+ */
+static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) {
+    if(buffer->delta_bytes == 0 && buffer->delta_files == 0 && !buffer->finished_files) {
+        /* special signal for end of shred preprocessing */
+        session->state = RM_PROGRESS_STATE_SHREDDER;
+        session->counters->shred_bytes_after_preprocess =
+            session->counters->shred_bytes_remaining;
+        session->counters->shred_bytes_total = session->counters->shred_bytes_remaining;
+    }
+
+    session->counters->shred_files_remaining += buffer->delta_files;
+    if(buffer->delta_files < 0) {
+        session->counters->total_filtered_files += buffer->delta_files;
+    }
+
+    if(buffer->delta_bytes != 0) {
+        session->counters->shred_bytes_remaining += buffer->delta_bytes;
+        rm_fmt_set_state(session->formats, session->state);
+
+        /* fake interrupt option for debugging/testing: */
+        if(session->state == RM_PROGRESS_STATE_SHREDDER && session->cfg->fake_abort &&
+           session->counters->shred_bytes_remaining * 10 <
+               session->counters->shred_bytes_total * 9) {
+            rm_session_abort();
+            /* prevent multiple aborts */
+            session->counters->shred_bytes_total = 0;
+        }
+    }
+
+    GQueue *files = buffer->finished_files;
+    if(files) {
+        rm_assert_gentle(files->head && files->head->data);
+        RmFile *head = files->head->data;
+        bool merge = (session->cfg->merge_directories &&
+                      head->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE);
+        rm_session_output_group(files, session, merge);
+    }
+
+    rm_shred_buffer_free(buffer);
+    rm_fmt_set_state(session->formats, session->state);
 }
 
 int rm_session_run(RmSession *session) {
@@ -309,18 +391,29 @@ int rm_session_run(RmSession *session) {
         rm_log_debug_line("Preprocessing output finished at %.3f (%lu other lint)",
                           g_timer_elapsed(session->timer, NULL),
                           session->counters->other_lint_cnt);
+    }
 
-        if(cfg->find_duplicates || cfg->merge_directories) {
-            rm_shred_run(session);
+    if(session->tables->size_groups && (cfg->find_duplicates || cfg->merge_directories)) {
+        /* run dupe finder */
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER_PREPROCESS);
 
-            rm_log_debug_line("Dupe search finished at time %.3f",
-                              g_timer_elapsed(session->timer, NULL));
-        }
+        GThreadPool *shredder_pipe =
+            rm_util_thread_pool_new((GFunc)rm_session_shredder_pipe, session, 1);
+
+        rm_shred_run(session, shredder_pipe);
+        g_thread_pool_free(shredder_pipe, FALSE, TRUE);
+
+        rm_log_debug_line("Dupe search finished at time %.3f",
+                          g_timer_elapsed(session->timer, NULL));
     }
 
     if(cfg->merge_directories) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
-        rm_tm_finish(session->dir_merger);
+        GThreadPool *merge_pipe =
+            rm_util_thread_pool_new((GFunc)rm_session_merge_pipe, session, 1);
+
+        rm_tm_finish(session->dir_merger, merge_pipe);
+        g_thread_pool_free(merge_pipe, FALSE, TRUE);
     }
 
     rm_fmt_flush(session->formats);

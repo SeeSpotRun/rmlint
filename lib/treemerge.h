@@ -58,7 +58,7 @@ void rm_tm_feed(RmTreeMerger *self, RmFile *file);
 /**
  * @brief Find duplicate directories through all feeded RmFiles.
  */
-void rm_tm_finish(RmTreeMerger *self);
+void rm_tm_finish(RmTreeMerger *self, GThreadPool *results_pipe);
 
 /**
  * @brief Free all memory allocated previously.

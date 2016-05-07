@@ -37,22 +37,6 @@
 //  PUBLIC TYPES  //
 ////////////////////
 
-/* Current state of rmlint */
-typedef enum RmFmtProgressState {
-    RM_PROGRESS_STATE_INIT,
-    RM_PROGRESS_STATE_TRAVERSE,
-    RM_PROGRESS_STATE_TRAVERSE_DONE,
-    RM_PROGRESS_STATE_PREPROCESS,
-    RM_PROGRESS_STATE_PREPROCESS_DONE,
-    RM_PROGRESS_STATE_SHREDDER,
-    RM_PROGRESS_STATE_SHREDDER_DONE,
-    RM_PROGRESS_STATE_MERGE,
-    RM_PROGRESS_STATE_MERGE_DONE,
-    RM_PROGRESS_STATE_PRE_SHUTDOWN,
-    RM_PROGRESS_STATE_SUMMARY,
-    RM_PROGRESS_STATE_N
-} RmFmtProgressState;
-
 /* Container and API-endpoint for individual RmFmtHandlers */
 typedef struct RmFmtTable {
     GHashTable *name_to_handler;

@@ -92,15 +92,16 @@ typedef struct RmDirectory {
 } RmDirectory;
 
 struct RmTreeMerger {
-    RmSession *session;       /* Session state variables / Settings                  */
-    RmTrie dir_tree;          /* Path-Trie with all RmFiles as value                 */
-    RmTrie count_tree;        /* Path-Trie with all file's count as value            */
-    GHashTable *result_table; /* {hash => [RmDirectory]} mapping                     */
-    GHashTable *file_groups;  /* Group files by hash                                 */
-    GHashTable *file_checks;  /* Set of files that were handled already.             */
-    GHashTable *known_hashs;  /* Set of known hashes, only used for cleanup.         */
-    GQueue *free_list;        /* List of RmFiles that will be free'd at the end.     */
-    GQueue valid_dirs;        /* Directories consisting of RmFiles only              */
+    RmSession *session;        /* Session state variables / Settings                  */
+    RmTrie dir_tree;           /* Path-Trie with all RmFiles as value                 */
+    RmTrie count_tree;         /* Path-Trie with all file's count as value            */
+    GHashTable *result_table;  /* {hash => [RmDirectory]} mapping                     */
+    GHashTable *file_groups;   /* Group files by hash                                 */
+    GHashTable *file_checks;   /* Set of files that were handled already.             */
+    GHashTable *known_hashs;   /* Set of known hashes, only used for cleanup.         */
+    GQueue *free_list;         /* List of RmFiles that will be free'd at the end.     */
+    GQueue valid_dirs;         /* Directories consisting of RmFiles only              */
+    GThreadPool *results_pipe; /* GThreadPool to send finished groups                 */
 };
 
 //////////////////////////
@@ -479,8 +480,7 @@ RmTreeMerger *rm_tm_new(RmSession *session) {
                                                (GDestroyNotify)g_queue_free);
 
     self->file_groups =
-        g_hash_table_new_full((GHashFunc)rm_digest_hash, (GEqualFunc)rm_digest_equal,
-                              NULL, (GDestroyNotify)g_queue_free);
+        g_hash_table_new((GHashFunc)rm_digest_hash, (GEqualFunc)rm_digest_equal);
 
     self->known_hashs = g_hash_table_new_full(NULL, NULL, NULL, NULL);
 
@@ -749,13 +749,13 @@ static void rm_tm_extract(RmTreeMerger *self) {
          */
         g_queue_sort(&result_dirs, (GCompareDataFunc)rm_tm_sort_orig_criteria, self);
 
-        GQueue file_adaptor_group = G_QUEUE_INIT;
+        GQueue *file_adaptor_group = g_queue_new();
 
         for(GList *iter = result_dirs.head; iter; iter = iter->next) {
             RmDirectory *directory = iter->data;
             RmFile *mask = rm_directory_as_new_file(self, directory);
             g_queue_push_tail(self->free_list, mask);
-            g_queue_push_tail(&file_adaptor_group, mask);
+            g_queue_push_tail(file_adaptor_group, mask);
 
             if(iter == result_dirs.head) {
                 /* First one in the group -> It's the original */
@@ -777,10 +777,9 @@ static void rm_tm_extract(RmTreeMerger *self) {
         }
 
         if(result_dirs.length >= 2) {
-            rm_shred_forward_to_output(self->session, &file_adaptor_group);
+            g_thread_pool_push(self->results_pipe, file_adaptor_group, NULL);
         }
 
-        g_queue_clear(&file_adaptor_group);
         g_queue_clear(&result_dirs);
     }
 
@@ -827,7 +826,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
             } else {
                 rm_shred_group_find_original(self->session, file_list,
                                              RM_SHRED_GROUP_FINISHING);
-                rm_shred_forward_to_output(self->session, file_list);
+                g_thread_pool_push(self->results_pipe, file_list, NULL);
             }
         }
     }
@@ -863,9 +862,10 @@ static void rm_tm_cluster_up(RmTreeMerger *self, RmDirectory *directory) {
     }
 }
 
-void rm_tm_finish(RmTreeMerger *self) {
+void rm_tm_finish(RmTreeMerger *self, GThreadPool *results_pipe) {
     /* Iterate over all valid directories and try to level them all layers up.
      */
+    self->results_pipe = results_pipe;
     g_queue_sort(&self->valid_dirs, (GCompareDataFunc)rm_tm_sort_paths_reverse, self);
     for(GList *iter = self->valid_dirs.head; iter; iter = iter->next) {
         RmDirectory *directory = iter->data;

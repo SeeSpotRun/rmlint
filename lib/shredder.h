@@ -37,28 +37,25 @@ typedef enum RmShredGroupStatus {
     RM_SHRED_GROUP_FINISHED
 } RmShredGroupStatus;
 
+/* buffer for sending progress updates and/or finished files to session.c */
+typedef struct RmShredBuffer {
+    gint64 delta_bytes;
+    gint delta_files;
+    GQueue *finished_files;
+} RmShredBuffer;
+
 /**
  * @brief Find duplicate RmFile and pass them to postprocess; free/destroy all other
  *RmFiles.
  *
  * @param session: rmlint session containing all cfg and pseudo-globals
  */
-void rm_shred_run(RmSession *session);
+void rm_shred_run(RmSession *session, GThreadPool *shredder_pipe);
 
 /**
- * @brief Forward a group of files to the outout module.
- *
- * @param session the output module's session.
- * @param group a group of dupes that should be reported.
- *
- * This function will determine the original of the group by using:
- *
- * - the is_original flag of the file,
- * - the is_prefd flag of the file
- * - otherwise sort by criteria
- * TODO: move this out of shredder
+ * @brief create a new RmShredBuffer with the provided data
  */
-void rm_shred_forward_to_output(RmSession *session, GQueue *group);
+RmShredBuffer *rm_shred_buffer_new(GQueue *files, gint delta_files, gint64 delta_bytes);
 
 /**
  * @brief Find the original file in a group and mark it.
@@ -66,5 +63,10 @@ void rm_shred_forward_to_output(RmSession *session, GQueue *group);
  */
 void rm_shred_group_find_original(RmSession *session, GQueue *group,
                                   RmShredGroupStatus status);
+/**
+ * @brief free an RmShredBuffer
+ * @note caller retains ownership of buffer->group
+ */
+void rm_shred_buffer_free(RmShredBuffer *buffer);
 
 #endif

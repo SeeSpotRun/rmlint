@@ -824,7 +824,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
                 self->session->counters->dup_group_counter -= 1;
                 self->session->counters->dup_counter -= file_list->length - 1;
             } else {
-                rm_shred_group_find_original(self->session, file_list,
+                rm_shred_group_find_original(self->session->cfg, file_list,
                                              RM_SHRED_GROUP_FINISHING);
                 g_thread_pool_push(self->results_pipe, file_list, NULL);
             }

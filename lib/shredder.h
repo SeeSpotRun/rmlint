@@ -28,6 +28,7 @@
 
 #include <glib.h>
 #include "session.h"
+#include "md-scheduler.h"
 
 typedef enum RmShredGroupStatus {
     RM_SHRED_GROUP_DORMANT = 0,
@@ -50,7 +51,8 @@ typedef struct RmShredBuffer {
  *
  * @param session: rmlint session containing all cfg and pseudo-globals
  */
-void rm_shred_run(RmSession *session, GThreadPool *shredder_pipe);
+void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
+                  GThreadPool *shredder_pipe, guint total_files);
 
 /**
  * @brief create a new RmShredBuffer with the provided data
@@ -61,8 +63,7 @@ RmShredBuffer *rm_shred_buffer_new(GQueue *files, gint delta_files, gint64 delta
  * @brief Find the original file in a group and mark it.
  * TODO: move this out of shredder
  */
-void rm_shred_group_find_original(RmSession *session, GQueue *group,
-                                  RmShredGroupStatus status);
+void rm_shred_group_find_original(RmCfg *cfg, GQueue *group, RmShredGroupStatus status);
 /**
  * @brief free an RmShredBuffer
  * @note caller retains ownership of buffer->group

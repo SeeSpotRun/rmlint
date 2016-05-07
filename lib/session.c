@@ -238,7 +238,8 @@ static void rm_session_output_other_lint(const RmSession *session) {
     }
 }
 
-static void rm_session_output_group(GQueue *files, RmSession *session, bool merge, bool count) {
+static void rm_session_output_group(GQueue *files, RmSession *session, bool merge,
+                                    bool count) {
     RmFile *file = files->head->data;
     if(count && file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         session->counters->dup_group_counter++;
@@ -307,7 +308,6 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
 
     if(buffer->delta_bytes != 0) {
         session->counters->shred_bytes_remaining += buffer->delta_bytes;
-        rm_fmt_set_state(session->formats, session->state);
 
         /* fake interrupt option for debugging/testing: */
         if(session->state == RM_PROGRESS_STATE_SHREDDER && session->cfg->fake_abort &&
@@ -329,6 +329,7 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
     }
 
     rm_shred_buffer_free(buffer);
+    rm_assert_gentle(session->state >= RM_PROGRESS_STATE_SHREDDER_PREPROCESS);
     rm_fmt_set_state(session->formats, session->state);
 }
 
@@ -413,12 +414,14 @@ int rm_session_run(RmSession *session) {
 
     if(session->tables->size_groups && (cfg->find_duplicates || cfg->merge_directories)) {
         /* run dupe finder */
+        session->state = RM_PROGRESS_STATE_SHREDDER_PREPROCESS;
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER_PREPROCESS);
 
         GThreadPool *shredder_pipe =
             rm_util_thread_pool_new((GFunc)rm_session_shredder_pipe, session, 1);
 
-        rm_shred_run(session, shredder_pipe);
+        rm_shred_run(cfg, session->tables, session->mds, shredder_pipe,
+                     session->counters->total_filtered_files);
         g_thread_pool_free(shredder_pipe, FALSE, TRUE);
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER_DONE);
 

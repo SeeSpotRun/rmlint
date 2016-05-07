@@ -36,6 +36,7 @@
 
 /* Current state of rmlint */
 typedef enum RmFmtProgressState {
+    RM_PROGRESS_STATE_UNKNOWN,
     RM_PROGRESS_STATE_INIT,
     RM_PROGRESS_STATE_TRAVERSE,
     RM_PROGRESS_STATE_TRAVERSE_DONE,

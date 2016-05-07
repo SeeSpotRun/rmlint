@@ -87,7 +87,6 @@ RmFmtTable *rm_fmt_open(RmSession *session) {
 
     self->session = session;
     g_queue_init(&self->groups);
-    g_rec_mutex_init(&self->state_mtx);
 
     extern RmFmtHandler *PROGRESS_HANDLER;
     rm_fmt_register(self, PROGRESS_HANDLER);
@@ -161,7 +160,6 @@ void rm_fmt_clear(RmFmtTable *self) {
 
 void rm_fmt_register(RmFmtTable *self, RmFmtHandler *handler) {
     g_hash_table_insert(self->name_to_handler, (char *)handler->name, handler);
-    g_mutex_init(&handler->print_mtx);
 }
 
 #define RM_FMT_FOR_EACH_HANDLER(self)                     \
@@ -172,19 +170,15 @@ void rm_fmt_register(RmFmtTable *self, RmFmtHandler *handler) {
     g_hash_table_iter_init(&iter, self->handler_to_file); \
     while(g_hash_table_iter_next(&iter, (gpointer *)&handler, (gpointer *)&file))
 
-#define RM_FMT_CALLBACK(func, ...)                               \
-    if(func) {                                                   \
-        g_mutex_lock(&handler->print_mtx);                       \
-        {                                                        \
-            if(!handler->was_initialized && handler->head) {     \
-                if(handler->head) {                              \
-                    handler->head(self->session, handler, file); \
-                }                                                \
-                handler->was_initialized = true;                 \
-            }                                                    \
-            func(self->session, handler, file, ##__VA_ARGS__);   \
-        }                                                        \
-        g_mutex_unlock(&handler->print_mtx);                     \
+#define RM_FMT_CALLBACK(func, ...)                           \
+    if(func) {                                               \
+        if(!handler->was_initialized && handler->head) {     \
+            if(handler->head) {                              \
+                handler->head(self->session, handler, file); \
+            }                                                \
+            handler->was_initialized = true;                 \
+        }                                                    \
+        func(self->session, handler, file, ##__VA_ARGS__);   \
     }
 
 bool rm_fmt_add(RmFmtTable *self, const char *handler_name, const char *path) {
@@ -221,7 +215,6 @@ bool rm_fmt_add(RmFmtTable *self, const char *handler_name, const char *path) {
      */
     RmFmtHandler *new_handler_copy = g_malloc0(new_handler->size);
     memcpy(new_handler_copy, new_handler, new_handler->size);
-    g_mutex_init(&new_handler->print_mtx);
 
     if(needs_full_path == false) {
         new_handler_copy->path = g_strdup(path);
@@ -336,7 +329,6 @@ void rm_fmt_close(RmFmtTable *self) {
     RM_FMT_FOR_EACH_HANDLER(self) {
         RM_FMT_CALLBACK(handler->foot);
         fclose(file);
-        g_mutex_clear(&handler->print_mtx);
     }
 
     g_hash_table_unref(self->name_to_handler);
@@ -344,7 +336,6 @@ void rm_fmt_close(RmFmtTable *self) {
     g_hash_table_unref(self->path_to_handler);
     g_hash_table_unref(self->config);
     g_hash_table_unref(self->handler_set);
-    g_rec_mutex_clear(&self->state_mtx);
     g_slice_free(RmFmtTable, self);
 }
 
@@ -367,22 +358,10 @@ void rm_fmt_write(RmFile *result, RmFmtTable *self, gint64 twin_count) {
     }
 }
 
-void rm_fmt_lock_state(RmFmtTable *self) {
-    g_rec_mutex_lock(&self->state_mtx);
-}
-
-void rm_fmt_unlock_state(RmFmtTable *self) {
-    g_rec_mutex_unlock(&self->state_mtx);
-}
-
 void rm_fmt_set_state(RmFmtTable *self, RmFmtProgressState state) {
-    rm_fmt_lock_state(self);
-    {
-        RM_FMT_FOR_EACH_HANDLER(self) {
-            RM_FMT_CALLBACK(handler->prog, state);
-        }
+    RM_FMT_FOR_EACH_HANDLER(self) {
+        RM_FMT_CALLBACK(handler->prog, state);
     }
-    rm_fmt_unlock_state(self);
 }
 
 void rm_fmt_set_config_value(RmFmtTable *self, const char *formatter, const char *key,

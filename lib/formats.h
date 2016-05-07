@@ -44,7 +44,6 @@ typedef struct RmFmtTable {
     GHashTable *handler_to_file;
     GHashTable *handler_set;
     GHashTable *config;
-    GRecMutex state_mtx;
     RmSession *session;
 
     /* Group of RmFiles that will be cached until exit */
@@ -87,11 +86,6 @@ typedef struct RmFmtHandler {
     RmFmtElemCallback elem;
     RmFmtProgCallback prog;
     RmFmtFootCallback foot;
-
-    /* mutex to protect against parallel calls.
-     * Handlers do not need to care about it.
-     */
-    GMutex print_mtx;
 
     /* A list of valid keys that may be passed to
      * --config fmt:key.
@@ -221,18 +215,6 @@ bool rm_fmt_is_a_output(RmFmtTable *self, const char *path);
  * Key is the path, value the handler name.
  */
 void rm_fmt_get_pair_iter(RmFmtTable *self, GHashTableIter *iter);
-
-/**
- * @brief Lock the state mutex.
- *
- * Use this to threadsafely update statistic counters.
- */
-void rm_fmt_lock_state(RmFmtTable *self);
-
-/**
- * @brief Pendant to rm_fmt_lock_state()
- */
-void rm_fmt_unlock_state(RmFmtTable *self);
 
 /**
  * @brief Check if a certain handler is writting to a stream.

@@ -85,7 +85,6 @@ typedef struct RmCounters {
     RmOff dup_group_counter;
     RmOff other_lint_cnt;
     /* Debugging counters */
-    RmOff offset_fragments;
     RmOff offsets_read;
     RmOff offset_fails;
 
@@ -98,7 +97,7 @@ typedef struct RmSession {
     /* stores all other configuration data based on command line input */
     RmCfg *cfg;
 
-    /* Stores for RmFile during traversal, preproces and shredder */
+    /* Stores for RmFile during traversal, preprocess and shredder */
     struct RmFileTables *tables;
 
     /* Table of mountpoints used in the system */

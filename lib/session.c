@@ -238,9 +238,27 @@ static void rm_session_output_other_lint(const RmSession *session) {
     }
 }
 
-static void rm_session_output_group(GQueue *files, RmSession *session, bool merge) {
+static void rm_session_output_group(GQueue *files, RmSession *session, bool merge, bool count) {
+    RmFile *file = files->head->data;
+    if(count && file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+        session->counters->dup_group_counter++;
+    }
     for(GList *iter = files->head; iter; iter = iter->next) {
-        RmFile *file = iter->data;
+        file = iter->data;
+
+        if(count && file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+            if(!file->is_original) {
+                session->counters->dup_counter++;
+                if(!RM_IS_BUNDLED_HARDLINK(file)) {
+                    /* Only check file size if it's not a hardlink.  Since
+                     * deleting hardlinks does not free any space they should
+                     * not be counted unless all of them would be removed.
+                     */
+                    session->counters->total_lint_size += file->file_size;
+                }
+            }
+        }
+
         if(merge) {
             rm_tm_feed(session->dir_merger, file);
         } else {
@@ -267,7 +285,7 @@ static void rm_session_output_group(GQueue *files, RmSession *session, bool merg
 /* threadpipe to receive duplicate files from treemerge
  */
 static void rm_session_merge_pipe(GQueue *files, RmSession *session) {
-    rm_session_output_group(files, session, FALSE);
+    rm_session_output_group(files, session, FALSE, FALSE);
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
 }
 
@@ -307,7 +325,7 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
         RmFile *head = files->head->data;
         bool merge = (session->cfg->merge_directories &&
                       head->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE);
-        rm_session_output_group(files, session, merge);
+        rm_session_output_group(files, session, merge, TRUE);
     }
 
     rm_shred_buffer_free(buffer);
@@ -402,6 +420,7 @@ int rm_session_run(RmSession *session) {
 
         rm_shred_run(session, shredder_pipe);
         g_thread_pool_free(shredder_pipe, FALSE, TRUE);
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER_DONE);
 
         rm_log_debug_line("Dupe search finished at time %.3f",
                           g_timer_elapsed(session->timer, NULL));

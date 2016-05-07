@@ -353,4 +353,10 @@ gint rm_file_node_cmp(const RmFile *file_a, const RmFile *file_b);
  */
 gint rm_file_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b);
 
+/**
+ * @brief Rank two files with identical inode in an order which
+ * distinguishes path doubles
+ */
+gint rm_file_cmp_pathdouble(RmFile *a, RmFile *b);
+
 #endif /* end of include guard */

@@ -39,67 +39,8 @@ typedef struct RmPPSession {
     GThreadPool *preprocess_file_pipe;
 } RmPPSession;
 
-/* GHashTable key tuned to recognize duplicate paths.
- * i.e. RmFiles that are not only hardlinks but
- * also point to the real path
- */
-typedef struct RmPathDoubleKey {
-    /* stat(dirname(file->path)).st_ino */
-    ino_t parent_inode;
-
-    /* File the key points to */
-    RmFile *file;
-
-} RmPathDoubleKey;
-
-static gpointer rm_path_double_hash(const RmPathDoubleKey *key) {
-    /* depend only on the always set components, never change the hash duringthe run */
-    return (gpointer)key->file->folder->parent;
-}
-
-static bool rm_path_have_same_parent(RmPathDoubleKey *key_a, RmPathDoubleKey *key_b) {
-    RmFile *file_a = key_a->file, *file_b = key_b->file;
-    return file_a->folder->parent == file_b->folder->parent;
-}
-
-static gboolean rm_path_double_equal(RmPathDoubleKey *key_a, RmPathDoubleKey *key_b) {
-    if(key_a->file->inode != key_b->file->inode) {
-        return FALSE;
-    }
-
-    if(key_a->file->dev != key_b->file->dev) {
-        return FALSE;
-    }
-
-    RmFile *file_a = key_a->file;
-    RmFile *file_b = key_b->file;
-
-    if(!rm_path_have_same_parent(key_a, key_b)) {
-        return FALSE;
-    }
-
-    return g_strcmp0(file_a->folder->basename, file_b->folder->basename) == 0;
-}
-
-static RmPathDoubleKey *rm_path_double_new(RmFile *file) {
-    RmPathDoubleKey *key = g_malloc0(sizeof(RmPathDoubleKey));
-    key->file = file;
-    return key;
-}
-
-static void rm_path_double_free(RmPathDoubleKey *key) {
-    g_free(key);
-}
-
 RmFileTables *rm_file_tables_new(void) {
     RmFileTables *tables = g_slice_new0(RmFileTables);
-
-    tables->unique_paths_table =
-        g_hash_table_new_full((GHashFunc)rm_path_double_hash,
-                              (GEqualFunc)rm_path_double_equal,
-                              (GDestroyNotify)rm_path_double_free,
-                              NULL);
-
     g_mutex_init(&tables->lock);
     return tables;
 }
@@ -136,24 +77,20 @@ static bool rm_pp_handle_other_lint(RmFile *file, const RmPPSession *preprocesso
     return TRUE;
 }
 
-static bool rm_pp_check_path_double(RmFile *file, RmPPSession *preprocessor) {
-    RmPathDoubleKey *key = rm_path_double_new(file);
+/* this is slightly annoying but enables use of rm_util_slist_foreach_remove */
+typedef struct {
+    RmFile *prev_file;
+    GThreadPool *preprocess_file_pipe;
+} RmPPPathDoubleBuffer;
 
-    /* Lookup if there is a file with the same path */
-    RmPathDoubleKey *match_double_key =
-        g_hash_table_lookup(preprocessor->tables->unique_paths_table, key);
-
-    if(match_double_key == NULL) {
-        g_hash_table_add(preprocessor->tables->unique_paths_table, key);
-        return FALSE;
+static bool rm_pp_check_path_double(RmFile *file, RmPPPathDoubleBuffer *buf) {
+    if(buf->prev_file && rm_file_cmp_pathdouble(file, buf->prev_file) == 0) {
+        file->lint_type = RM_LINT_TYPE_PATHDOUBLE;
+        g_thread_pool_push(buf->preprocess_file_pipe, file, NULL);
+        return TRUE;
     }
-    RmFile *match_double = match_double_key->file;
-    rm_assert_gentle(match_double != file);
-
-    rm_path_double_free(key);
-    file->lint_type = RM_LINT_TYPE_PATHDOUBLE;
-    g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
-    return TRUE;
+    buf->prev_file = file;
+    return FALSE;
 }
 
 #define RM_SLIST_LEN_GT_1(list) (list) && (list)->next
@@ -172,10 +109,12 @@ static RmFile *rm_preprocess_cluster(GSList *cluster, RmPPSession *preprocessor)
         /* there is a cluster of inode matches */
 
         /* remove path doubles */
-        rm_util_slist_foreach_remove(&cluster, (RmRFunc)rm_pp_check_path_double,
-                                     preprocessor);
-        /* clear the hashtable ready for the next cluster */
-        g_hash_table_remove_all(preprocessor->tables->unique_paths_table);
+        cluster = g_slist_sort(cluster, (GCompareFunc)rm_file_cmp_pathdouble);
+
+        RmPPPathDoubleBuffer buf;
+        buf.prev_file = NULL;
+        buf.preprocess_file_pipe = preprocessor->preprocess_file_pipe;
+        rm_util_slist_foreach_remove(&cluster, (RmRFunc)rm_pp_check_path_double, &buf);
     }
 
     /* process and remove other lint */

@@ -332,14 +332,6 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
     rm_fmt_set_state(session->formats, session->state);
 }
 
-int rm_session_free_inode(_UNUSED RmTrie *self, RmNode *node, _UNUSED int level,
-                          _UNUSED void *user_data) {
-    if(node->data) {
-        g_slice_free(ino_t, node->data);
-    }
-    return 0;
-}
-
 int rm_session_run(RmSession *session) {
     /* --- Setup --- */
     int exit_state = EXIT_SUCCESS;
@@ -413,9 +405,6 @@ int rm_session_run(RmSession *session) {
             session->counters->ignored_files, session->counters->ignored_folders);
 
         rm_session_output_other_lint(session);
-
-        rm_trie_iter(&cfg->file_trie, cfg->file_trie.root, TRUE, TRUE,
-                     (RmTrieIterCallback)rm_session_free_inode, NULL);
 
         rm_log_debug_line("Preprocessing output finished at %.3f (%lu other lint)",
                           g_timer_elapsed(session->timer, NULL),

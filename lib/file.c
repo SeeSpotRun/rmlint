@@ -385,3 +385,11 @@ gint rm_file_cmp_pathdouble(RmFile *a, RmFile *b) {
     rm_log_debug_line("Path double inode check: %lu vs %lu", *(ino_t *)pa->data, *(ino_t *)pb->data);
     return SIGN_DIFF(*(ino_t *)pa->data, *(ino_t *)pb->data);
 }
+
+gint rm_file_cmp_pathdouble_full(RmFile *a, RmFile *b) {
+    gint result = rm_file_cmp_pathdouble(a, b);
+    if (result != 0) {
+        return result;
+    }
+    return rm_file_cmp_orig_criteria_pre(a, b, a->cfg);
+}

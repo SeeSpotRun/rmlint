@@ -108,12 +108,14 @@ static RmFile *rm_preprocess_cluster(GSList *cluster, RmPPSession *preprocessor)
     if(RM_SLIST_LEN_GT_1(cluster)) {
         /* there is a cluster of inode matches */
 
-        /* remove path doubles */
-        cluster = g_slist_sort(cluster, (GCompareFunc)rm_file_cmp_pathdouble);
+        /* remove path doubles by sorting and then finding identical neighbours */
+        /* TODO: this seems to slow down rmlint somewhat; revisit */
+        cluster = g_slist_sort(cluster, (GCompareFunc)rm_file_cmp_pathdouble_full);
 
         RmPPPathDoubleBuffer buf;
         buf.prev_file = NULL;
         buf.preprocess_file_pipe = preprocessor->preprocess_file_pipe;
+
         rm_util_slist_foreach_remove(&cluster, (RmRFunc)rm_pp_check_path_double, &buf);
     }
 

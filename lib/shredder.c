@@ -718,8 +718,7 @@ static void rm_shred_discard_file(RmFile *file, RmLintType lint_type) {
 static void rm_shred_push_queue(RmFile *file) {
     if(file->hash_offset == 0) {
         /* first-timer; lookup disk offset */
-        if(file->cfg->build_fiemap && !rm_mds_device_is_rotational(file->disk)) {
-            /* TODO: add is_rotational call to mds */
+        if(file->cfg->build_fiemap && rm_mds_device_is_rotational(file->disk)) {
             RM_DEFINE_PATH(file);
             file->disk_offset = rm_offset_get_from_path(file_path, 0, NULL);
         } else {

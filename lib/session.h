@@ -59,9 +59,6 @@ typedef struct RmFileTables {
     /* GSList of GList's, one for each file size */
     GSList *size_groups;
 
-    /* Used for finding path doubles */
-    GHashTable *unique_paths_table;
-
     /*array of lists, one for each "other lint" type */
     GSList *other_lint[RM_LINT_TYPE_OTHER];
 

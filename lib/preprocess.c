@@ -53,8 +53,6 @@ void rm_file_tables_destroy(RmFileTables *tables) {
         tables->size_groups = NULL;
     }
 
-    g_hash_table_unref(tables->unique_paths_table);
-
     g_mutex_clear(&tables->lock);
     g_slice_free(RmFileTables, tables);
 }

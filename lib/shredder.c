@@ -313,7 +313,6 @@ typedef struct RmShredTag {
     gint64 paranoid_mem_alloc; /* how much memory to allocate for paranoid checks */
     gint32 active_groups; /* how many shred groups active (only used with paranoid) */
     RmHasher *hasher;
-    GThreadPool *result_pool;
     RmMDS *mds;
     /* threadpool for sending files and progress updates to session.c */
     GThreadPool *shredder_pipe;
@@ -762,6 +761,32 @@ static void rm_shred_group_free(RmShredGroup *self, bool free_digest) {
     g_slice_free(RmShredGroup, self);
 }
 
+/* prepare a finished shred_group for output */
+static void rm_shred_group_output(RmShredGroup *group) {
+    if(g_queue_get_length(group->held_files) > 0) {
+        /* find the original(s) (note this also unbundles hardlinks and sorts
+         * the group from highest ranked to lowest ranked
+         */
+        rm_shred_group_find_original(group->shredder->cfg, group->held_files, group->status);
+
+        /* Point the files to their (shared) digest */
+        for(GList *iter = group->held_files->head; iter; iter = iter->next) {
+            RmFile *file = iter->data;
+            file->digest = group->digest;
+        }
+
+        /* send files to session for output and file freeing */
+        rm_shred_send(group->shredder->shredder_pipe, group->held_files, 0, 0);
+        group->held_files = NULL;
+    }
+
+    if(group->status == RM_SHRED_GROUP_FINISHING) {
+        group->status = RM_SHRED_GROUP_FINISHED;
+    }
+    /* Do not free digest, output module will do that. */
+    rm_shred_group_free(group, false);
+}
+
 /* call unlocked; should be no contention issues since group is finished */
 static void rm_shred_group_finalise(RmShredGroup *self) {
     /* return any paranoid mem allocation */
@@ -770,7 +795,7 @@ static void rm_shred_group_finalise(RmShredGroup *self) {
     switch(self->status) {
     case RM_SHRED_GROUP_DORMANT:
         /* Dead-ended files; may still be wanted by some output formatters */
-        rm_util_thread_pool_push(self->shredder->result_pool, self);
+        rm_shred_group_output(self);
         break;
     case RM_SHRED_GROUP_START_HASHING:
     case RM_SHRED_GROUP_HASHING:
@@ -787,7 +812,7 @@ static void rm_shred_group_finalise(RmShredGroup *self) {
         /* send it to finisher (which takes responsibility for calling
          * rm_shred_group_free())*/
         /* TODO: direct call */
-        rm_util_thread_pool_push(self->shredder->result_pool, self);
+        rm_shred_group_output(self);
         break;
     case RM_SHRED_GROUP_FINISHED:
     default:
@@ -1219,34 +1244,6 @@ void rm_shred_group_find_original(RmCfg *cfg, GQueue *files, RmShredGroupStatus 
     }
 }
 
-static void rm_shred_result_factory(RmShredGroup *group, RmShredTag *shredder) {
-    if(g_queue_get_length(group->held_files) > 0) {
-        /* find the original(s) (note this also unbundles hardlinks and sorts
-         * the group from highest ranked to lowest ranked
-         */
-        rm_shred_group_find_original(shredder->cfg, group->held_files, group->status);
-
-        /* Point the files to their (shared) digest */
-        for(GList *iter = group->held_files->head; iter; iter = iter->next) {
-            RmFile *file = iter->data;
-            file->digest = group->digest;
-        }
-
-        /* send files to session for output and file freeing */
-        rm_shred_send(shredder->shredder_pipe, group->held_files, 0, 0);
-        group->held_files = NULL;
-    }
-
-    if(group->status == RM_SHRED_GROUP_FINISHING) {
-        group->status = RM_SHRED_GROUP_FINISHED;
-    }
-#if _RM_SHRED_DEBUG
-    rm_log_debug_line("Free from rm_shred_result_factory");
-#endif
-
-    /* Do not free digest, output module will do that. */
-    rm_shred_group_free(group, false);
-}
 
 /////////////////////////////////
 //    ACTUAL IMPLEMENTATION    //
@@ -1445,11 +1442,6 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                      cfg->threads_per_disk,
                      (RmMDSSortFunc)rm_mds_elevator_cmp);
 
-    /* Create a pool for results processing
-     * TODO: maybe remove and combine with shredder_pipe */
-    shredder.result_pool =
-        rm_util_thread_pool_new((GFunc)rm_shred_result_factory, &shredder, 1);
-
     rm_shred_preprocess_input(&shredder, tables);
 
     /* estimate mem used for RmFiles and allocate any leftovers to read buffer and/or
@@ -1495,9 +1487,6 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
     /* should complete shred session and then free: */
     rm_mds_free(shredder.mds, FALSE);
     rm_hasher_free(shredder.hasher, TRUE);
-
-    /* This should not block, or at least only very short. */
-    g_thread_pool_free(shredder.result_pool, FALSE, TRUE);
 
     g_mutex_clear(&shredder.hash_mem_mtx);
 }

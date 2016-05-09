@@ -270,8 +270,10 @@ int rm_file_cmp_orig_criteria_pre(const RmFile *a, const RmFile *b, const RmCfg 
                 break;
             }
             if(cmp) {
-                /* reverse order if uppercase option */
-                cmp = cmp * (isupper((unsigned char)cfg->sort_criteria[i]) ? -1 : +1);
+                if(isupper((unsigned char)cfg->sort_criteria[i])) {
+                    /* reverse order if uppercase option */
+                    cmp = -cmp;
+                }
                 return cmp;
             }
         }
@@ -299,21 +301,22 @@ int rm_file_cmp_orig_criteria_post(RmFile *a, RmFile *b, RmCfg *cfg) {
 gint rm_file_cmp_size_etc(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
     gint result = SIGN_DIFF(file_a->file_size, file_b->file_size);
 
-    if(result == 0) {
-        result = (cfg->match_basename) ? rm_file_basenames_cmp(file_a, file_b) : 0;
+    if(result != 0) {
+        return result;
     }
 
-    if(result == 0) {
-        result =
-            (cfg->match_with_extension) ? rm_file_cmp_with_extension(file_a, file_b) : 0;
+    if(cfg->match_basename && (result = rm_file_basenames_cmp(file_a, file_b)) != 0) {
+        return result;
     }
 
-    if(result == 0) {
-        result = (cfg->match_without_extension)
-                     ? rm_file_cmp_without_extension(file_a, file_b)
-                     : 0;
+    if(cfg->match_with_extension &&
+       (result = rm_file_cmp_with_extension(file_a, file_b)) != 0) {
+        return result;
     }
 
+    if(cfg->match_without_extension) {
+        result = rm_file_cmp_without_extension(file_a, file_b);
+    }
     return result;
 }
 

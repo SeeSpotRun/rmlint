@@ -98,7 +98,7 @@ static void rm_traverse_session_free(RmTravSession *traverser) {
 static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path,
                              bool is_prefd, unsigned long path_index,
                              RmLintType file_type, bool is_symlink, bool is_hidden,
-                             bool is_on_subvol_fs, short depth) {
+                             short depth) {
     const RmCfg *cfg = traverser->cfg;
 
     /* Try to autodetect the type of the lint */
@@ -142,7 +142,6 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
     if(file != NULL) {
         file->is_symlink = is_symlink;
         file->is_hidden = is_hidden;
-        file->is_on_subvol_fs = is_on_subvol_fs;
         g_thread_pool_push(traverser->file_pool, file, NULL);
     }
 }
@@ -164,7 +163,7 @@ static bool rm_traverse_is_hidden(const RmCfg *cfg, const char *basename, char *
         traverser, (RmStat *)stat_buf, p->fts_path, is_prefd, path_index, lint_type, \
         is_symlink,                                                                  \
         rm_traverse_is_hidden(cfg, p->fts_name, is_hidden, p->fts_level + 1),        \
-        is_on_subvol_fs, p->fts_level);
+        p->fts_level);
 
 #if RM_PLATFORM_32 && HAVE_STAT64
 
@@ -213,11 +212,6 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser
 
     /* Initialize ftsp */
     int fts_flags = FTS_PHYSICAL | FTS_COMFOLLOW | FTS_NOCHDIR;
-
-    bool is_on_subvol_fs = (buffer->path[0] == '/' && buffer->path[1] == '/');
-    if(is_on_subvol_fs) {
-        rm_log_debug_line("Treating files under %s as a single volume", buffer->path);
-    }
 
     FTS *ftsp = fts_open((char * [2]){buffer->path, NULL}, fts_flags, NULL);
 
@@ -333,7 +327,7 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser
                                      path_index, RM_LINT_TYPE_UNKNOWN, false,
                                      rm_traverse_is_hidden(cfg, p->fts_name, is_hidden,
                                                            p->fts_level + 1),
-                                     is_on_subvol_fs, p->fts_level);
+                                     p->fts_level);
                     rm_log_warning_line(_("Added big file %s"), p->fts_path);
                 } else {
                     rm_log_warning(_("cannot stat file %s (skipping)"), p->fts_path);
@@ -457,7 +451,7 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
 
             rm_traverse_file(traverser, &buffer->stat_buf, buffer->path, buffer->is_prefd,
                              buffer->path_index, RM_LINT_TYPE_UNKNOWN, false, is_hidden,
-                             FALSE, 0);
+                             0);
 
             rm_trav_buffer_free(buffer);
         } else if(S_ISDIR(buffer->stat_buf.st_mode)) {

@@ -175,7 +175,6 @@ def compare_json_docs(docs_a, docs_b, compare_checksum=False):
 
 def run_rmlint_pedantic(*args, **kwargs):
     options = [
-        '--with-fiemap',
         '--without-fiemap',
         '--fake-pathindex-as-disk',
         '--fake-fiemap',

@@ -64,7 +64,7 @@ def test_hardlinks():
     create_link('2/a', '2/link1')
     create_link('2/a', '2/link2')
 
-    head, *data, footer = run_rmlint('-pp -D -l -S a')
+    head, *data, footer = run_rmlint('-pp -D -S a')
     assert len(data) is 5
     assert data[0]['type'] == 'duplicate_dir'
     assert data[0]['path'].endswith('1')

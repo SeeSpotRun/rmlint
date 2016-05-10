@@ -142,7 +142,7 @@ General Options
     defined with **-o**. Passing either option more than three times has no
     effect.
 
-:``-g --progress`` / ``-G --no-progress`` (**default**):
+:``-g --progress`` (**default\:** *disabled*):
 
     Convenience shortcut for ``-o progressbar -o summary -o sh:rmlint.sh -VVV``.
 
@@ -241,25 +241,25 @@ Traversal Options
     Only recurse up to this depth. A depth of 1 would disable recursion and is
     equivalent to a directory listing.
 
-:``-l --hardlinked`` (**default**) / ``-L --no-hardlinked``:
+:``-L --no-hardlinked``:
 
-    Whether to report hardlinked files as duplicates.
+    Don't report hardlinked files as duplicates of each other.
 
-:``-f --followlinks`` / ``-F --no-followlinks`` / ``-@ --see-symlinks`` (**default**):
+:``-f --followlinks``:
 
-    ``-f`` will always follow symbolic links. If file system loops occur
-    ``rmlint`` will detect this. If `-F` is specified, symbolic links will be
-    ignored completely, if ``-@`` is specified, ``rmlint`` will see symlinks and
-    treats them like small files with the path to their target in them. The
-    latter is the default behaviour, since it is a sensible default for
-    ``--merge-directories``.
+    Follow symbolic links. If file system loops occur ``rmlint`` will detect this.
 
-:``-x --no-crossdev`` / ``-X --crossdev`` (**default**):
+:``-@ --see-symlinks``:
 
-    Stay always on the same device (``-x``),
-    or allow crossing mountpoints (``-X``)?
+    If ``-@`` is specified, ``rmlint`` will see symlinks and treats them like
+    small files with the path to their target in them. This option is enabled
+    automatically if ``--merge-directories`` is enabled.
 
-:``-r --hidden`` / ``-R --no-hidden`` (**default**) / ``--partial-hidden``:
+:``-x --no-crossdev``:
+
+    Do not cross mountpoints onto another device.
+
+:``-r --hidden``/ ``--partial-hidden`` (**default\:** *disabled*):
 
     Also traverse hidden directories? This is often not a good idea, since
     directories like ``.git/`` would be investigated.
@@ -447,9 +447,9 @@ Rarely used, miscellaneous options
     Also it might be useful for approximate comparison where it suffices when
     the file is the same in the middle part.
 
-:``--with-fiemap`` (**default**) / ``--without-fiemap``:
+:``--without-fiemap``:
 
-    Enable or disable reading the file extents on rotational disk in order to
+    Disable reading the file extents on rotational disk in order to
     optimize disk access patterns.
 
 FORMATTERS

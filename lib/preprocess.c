@@ -57,140 +57,120 @@ void rm_file_tables_destroy(RmFileTables *tables) {
     g_slice_free(RmFileTables, tables);
 }
 
-/* if file is not DUPE_CANDIDATE then send it to session->tables->other_lint and
- * return 1; else return 0 */
-static bool rm_pp_handle_other_lint(RmFile *file, const RmPPSession *preprocessor) {
-    if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+static int rm_preprocess_hardlinks(RmFile *file, RmFile *prev,
+                                   RmPPSession *preprocessor) {
+    if(!prev) {
         return FALSE;
     }
-    /* TODO: move to traversal? */
-    if(preprocessor->cfg->filter_mtime && file->mtime < preprocessor->cfg->min_mtime) {
-        file->lint_type = RM_LINT_TYPE_WRONG_TIME;
-    } else if((preprocessor->cfg->keep_all_tagged && file->is_prefd) ||
-              (preprocessor->cfg->keep_all_untagged && !file->is_prefd)) {
-        /* "Other" lint protected by --keep-all-{un,}tagged */
-        file->lint_type = RM_LINT_TYPE_KEEP_TAGGED;
+    if(rm_file_node_cmp(file, prev) != 0) {
+        /* not a hardlink */
+        return FALSE;
     }
-    g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
+
+    /* file is a hardlink of prev; remove from list, possibly bundling first depending on
+     * cfg */
+    if(!preprocessor->cfg->find_hardlinked_dupes) {
+        /* we're not looking for hardlinked dupes */
+        file->lint_type = RM_LINT_TYPE_HARDLINK;
+    } else {
+        /* bundle hardlink */
+        if(!prev->hardlinks.files) {
+            /* first hardlink, set up queue */
+            prev->hardlinks.files = g_queue_new();
+            prev->hardlinks.is_head = TRUE;
+        }
+        g_queue_push_tail(prev->hardlinks.files, file);
+        file->hardlinks.hardlink_head = prev;
+    }
+
+    /* send file to session for counting purposes (whether bundled or not) */
+    rm_util_thread_pool_push(preprocessor->preprocess_file_pipe, file);
     return TRUE;
 }
 
-/* this is slightly annoying but enables use of rm_util_slist_foreach_remove */
-typedef struct {
-    RmFile *prev_file;
-    GThreadPool *preprocess_file_pipe;
-} RmPPPathDoubleBuffer;
-
-static bool rm_pp_check_path_double(RmFile *file, RmPPPathDoubleBuffer *buf) {
-    if(buf->prev_file && rm_file_cmp_pathdouble(file, buf->prev_file) == 0) {
-        file->lint_type = RM_LINT_TYPE_PATHDOUBLE;
-        g_thread_pool_push(buf->preprocess_file_pipe, file, NULL);
-        return TRUE;
+/* Preprocess duplicate candidate groups to bundle embedded hardlinks.
+ * Return TRUE if the resultant group has only 1 member */
+static int rm_preprocess_size_group(GSList *group, _UNUSED GSList *prev,
+                                    RmPPSession *preprocessor) {
+    rm_assert_gentle(group);
+    rm_assert_gentle(preprocessor);
+    rm_util_slist_foreach_remove(&group, (RmSListRFunc)rm_preprocess_hardlinks,
+                                 preprocessor);
+    rm_assert_gentle(group);
+    if(!group->next) {
+        RmFile *solo = group->data;
+        if(!solo->hardlinks.is_head) {
+            solo->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
+            rm_util_thread_pool_push(preprocessor->preprocess_file_pipe, solo);
+            g_slist_free(group);
+            return TRUE;
+        }
     }
-    buf->prev_file = file;
     return FALSE;
 }
 
-#define RM_SLIST_LEN_GT_1(list) (list) && (list)->next
-
-/* Preprocess files, including embedded hardlinks.  Any embedded hardlinks
- * that are "other lint" types are sent to rm_pp_handle_other_lint.  If the
- * file itself is "other lint" types it is likewise sent to rm_pp_handle_other_lint.
- * If there are no files left after this then return TRUE so that the
- * cluster can be deleted from the node_table hash table.
- * NOTE: we rely on rm_file_list_insert to select an RM_LINT_TYPE_DUPE_CANDIDATE as head
- * file (unless ALL the files are "other lint"). */
-static RmFile *rm_preprocess_cluster(GSList *cluster, RmPPSession *preprocessor) {
-    const RmCfg *cfg = preprocessor->cfg;
-
-    if(RM_SLIST_LEN_GT_1(cluster)) {
-        /* there is a cluster of inode matches */
-
-        /* remove path doubles by sorting and then finding identical neighbours */
-        /* TODO: this seems to slow down rmlint somewhat; revisit */
-        cluster = g_slist_sort(cluster, (GCompareFunc)rm_file_cmp_pathdouble_full);
-
-        RmPPPathDoubleBuffer buf;
-        buf.prev_file = NULL;
-        buf.preprocess_file_pipe = preprocessor->preprocess_file_pipe;
-
-        rm_util_slist_foreach_remove(&cluster, (RmRFunc)rm_pp_check_path_double, &buf);
-    }
-
-    /* process and remove other lint */
-    rm_util_slist_foreach_remove(&cluster, (RmRFunc)rm_pp_handle_other_lint,
-                                 (RmPPSession *)preprocessor);
-
-    if(RM_SLIST_LEN_GT_1(cluster)) {
-        /* bundle or free the non-head files */
-        /* TODO: defer this until shredder */
-        RmFile *headfile = cluster->data;
-        if(cfg->find_hardlinked_dupes) {
-            /* prepare to bundle files under the hardlink head */
-            headfile->hardlinks.files = g_queue_new();
-            headfile->hardlinks.is_head = TRUE;
-        }
-        GSList *hardlinks = cluster->next;
-        cluster->next = NULL;
-
-        for(GSList *iter = hardlinks; iter; iter = iter->next) {
-            RmFile *file = iter->data;
-            if(cfg->find_hardlinked_dupes) {
-                /* bundle hardlink */
-                g_queue_push_tail(headfile->hardlinks.files, file);
-                file->hardlinks.hardlink_head = headfile;
-            } else {
-                file->lint_type = RM_LINT_TYPE_HARDLINK;
-            }
-            /* send to file pipe for counting (hardlink cluster are counted as
-             * filtered files since they are either ignored or treated as automatic
-             * duplicates depending on settings, and occupy no space anyway).
-             */
-            g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
-        }
-        g_slist_free(hardlinks);
-    }
-
-    if(cluster) {
-        /* should only be max 1 file left in list */
-        rm_assert_gentle(!cluster->next);
-        RmFile *result = cluster->data;
-        g_slist_free(cluster);
+/* sort function to sort files into size groups; also groups hardlinks within
+ * each size group.  Guaranteed to place path doubles adjacent to each other
+ * in decreasing order of "originality" criteria.
+ * Used for first pass of preprocessing */
+gint rm_pp_cmp_phase1(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
+    /* sort by size then (depending on cfg) maybe by basename extension and/or prefix;
+     * note this will never separate path doubles but may separate hardlinks */
+    gint result = rm_file_cmp_dupe_group(file_a, file_b, cfg);
+    if(result != 0) {
         return result;
     }
-    return NULL;
+    /* next sort by dev/inode so that hardlinks path doubles get grouped together */
+    if((result = rm_file_node_cmp(file_a, file_b)) != 0) {
+        return result;
+    }
+
+    if((result = rm_file_cmp_pathdouble(file_a, file_b)) != 0) {
+        return result;
+    }
+
+    /* must be path doubles; rank most "original" first */
+
+    return rm_file_cmp_orig_criteria_pre(file_a, file_b, cfg);
 }
 
-static GSList *rm_preprocess_size_group(GSList *head, RmPPSession *preprocessor) {
-    /* sort by inode so we can identify inode clusters; this is faster
-     * and lighter than hashtable approach */
-    GSList *result = NULL;
-    head = g_slist_sort(head, (GCompareFunc)rm_file_node_cmp);
-    GSList *next = NULL;
-    for(GSList *iter = head; iter; iter = next) {
-        next = iter->next;
-        if(!next || rm_file_node_cmp(iter->data, next->data) != 0) {
-            /* next inode found; split the list */
-            iter->next = NULL;
-            /* process head...iter to remove lint and bundle hardlinks */
-            RmFile *cluster_file = rm_preprocess_cluster(head, preprocessor);
-            if(cluster_file) {
-                result = g_slist_prepend(result, cluster_file);
-            }
-            /* point to start of next cluster */
-            head = next;
+/* sort function to sort size groups by inode then by originality; this facilitates
+ * hardlink bundling */
+gint rm_pp_cmp_phase2(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
+    gint result = rm_file_node_cmp(file_a, file_b);
+    if(result != 0) {
+        return result;
+    }
+    return rm_file_cmp_orig_criteria_pre(file_a, file_b, cfg);
+}
+
+/* RMRFunc to strip out "other lint" and path doubles */
+static int rm_pp_strip_lint(RmFile *file, RmFile *prev, RmPPSession *preprocessor) {
+    rm_assert_gentle(file);
+
+    if(prev && rm_file_node_cmp(file, prev) == 0 &&
+       rm_file_cmp_pathdouble(file, prev) == 0) {
+        /* path double; kick out */
+        rm_log_debug_line("Kicking path double");
+        file->lint_type = RM_LINT_TYPE_PATHDOUBLE;
+        /* will send to threadpool before return */
+    } else if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+        return FALSE;
+    } else {
+        /* handle "other" lint... */
+        /* First check some filter criteria (TODO: move to traversal?) */
+        const RmCfg *cfg = preprocessor->cfg;
+        if(cfg->filter_mtime && file->mtime < cfg->min_mtime) {
+            file->lint_type = RM_LINT_TYPE_WRONG_TIME;
+        } else if((cfg->keep_all_tagged && file->is_prefd) ||
+                  (cfg->keep_all_untagged && !file->is_prefd)) {
+            /* "Other" lint protected by --keep-all-{un,}tagged */
+            file->lint_type = RM_LINT_TYPE_KEEP_TAGGED;
         }
     }
-    if(result && !result->next && !((RmFile *)result->data)->hardlinks.is_head) {
-        /* singleton group; discard */
-        RmFile *file = result->data;
-        file->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
-        g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
-        g_slist_free(result);
-        result = NULL;
-    }
 
-    return result;
+    g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);
+    return TRUE;
 }
 
 /* This does preprocessing including handling of "other lint" (non-dupes)
@@ -205,34 +185,34 @@ static GSList *rm_preprocess_size_group(GSList *head, RmPPSession *preprocessor)
  */
 void rm_preprocess(const RmCfg *cfg, RmFileTables *tables,
                    GThreadPool *preprocess_file_pipe) {
-    RmPPSession *preprocessor = g_slice_new(RmPPSession);
-    preprocessor->cfg = cfg;
-    preprocessor->tables = tables;
-    preprocessor->preprocess_file_pipe = preprocess_file_pipe;
+    RmPPSession preprocessor;
+    preprocessor.cfg = cfg;
+    preprocessor.tables = tables;
+    preprocessor.preprocess_file_pipe = preprocess_file_pipe;
 
     rm_assert_gentle(tables->all_files);
 
     /* initial sort by size */
     tables->all_files = g_slist_sort_with_data(
-        tables->all_files, (GCompareDataFunc)rm_file_cmp_full, (gpointer)cfg);
+        tables->all_files, (GCompareDataFunc)rm_pp_cmp_phase1, (gpointer)cfg);
 
-    /* split into file size groups and process each group to remove path doubles etc */
-    GSList *next = NULL;
-    for(GSList *iter = tables->all_files; iter; iter = next) {
+    /* remove path doubles and other lint */
+    rm_util_slist_foreach_remove(&tables->all_files, (RmSListRFunc)rm_pp_strip_lint,
+                                 &preprocessor);
+
+    /* chunk into size groups */
+    for(GSList *iter = tables->all_files, *next = NULL; iter; iter = next) {
         next = iter->next;
-        if(!next || rm_file_cmp_size_etc(iter->data, next->data, (gpointer)cfg) != 0) {
-            /* split list and process size group*/
-            if(rm_session_was_aborted()) {
-                break;
-            }
+        if(!next || rm_file_cmp_dupe_group(iter->data, next->data, cfg) != 0) {
             iter->next = NULL;
-            GSList *size_group =
-                rm_preprocess_size_group(tables->all_files, preprocessor);
-            if(size_group) {
-                tables->size_groups = g_slist_prepend(tables->size_groups, size_group);
-            }
+            GSList *size_group = g_slist_sort_with_data(
+                tables->all_files, (GCompareDataFunc)rm_pp_cmp_phase2, (gpointer)cfg);
+            tables->size_groups = g_slist_prepend(tables->size_groups, size_group);
             tables->all_files = next;
         }
     }
-    g_slice_free(RmPPSession, preprocessor);
+
+    /* for each size group, bundle hardlinks.  Delete any singleton groups */
+    rm_util_slist_foreach_remove(&tables->size_groups,
+                                 (RmSListRFunc)rm_preprocess_size_group, &preprocessor);
 }

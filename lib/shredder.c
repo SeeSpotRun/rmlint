@@ -767,7 +767,8 @@ static void rm_shred_group_output(RmShredGroup *group) {
         /* find the original(s) (note this also unbundles hardlinks and sorts
          * the group from highest ranked to lowest ranked
          */
-        rm_shred_group_find_original(group->shredder->cfg, group->held_files, group->status);
+        rm_shred_group_find_original(group->shredder->cfg, group->held_files,
+                                     group->status);
 
         /* Point the files to their (shared) digest */
         for(GList *iter = group->held_files->head; iter; iter = iter->next) {
@@ -1243,7 +1244,6 @@ void rm_shred_group_find_original(RmCfg *cfg, GQueue *files, RmShredGroupStatus 
                                      files->head->data);
     }
 }
-
 
 /////////////////////////////////
 //    ACTUAL IMPLEMENTATION    //

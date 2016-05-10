@@ -215,7 +215,7 @@ typedef gpointer (*RmNewFunc)(void);
 GQueue *rm_hash_table_setdefault(GHashTable *table, gpointer key, RmNewFunc default_func);
 
 /**
- * @brief Function prototype for remove-iterating over a GQueue/GList/GSList.
+ * @brief Function prototype for remove-iterating over a GQueue/GList.
  *
  * @param data current element
  * @param user_data optional user_data
@@ -251,6 +251,17 @@ gint rm_util_queue_foreach_remove(GQueue *queue, RmRFunc func, gpointer user_dat
 gint rm_util_list_foreach_remove(GList **list, RmRFunc func, gpointer user_data);
 
 /**
+ * @brief Function prototype for remove-iterating over a GSList.
+ *
+ * @param data current element's data
+ * @param prev previous (not deleted) element's data; null for first element
+ * @param user_data optional user_data
+ *
+ * @return True if the current element should be removed.
+ */
+typedef gboolean (*RmSListRFunc)(gpointer data, gpointer prev, gpointer user_data);
+
+/**
  * @brief Iterate over a GSList and call `func` on each element.
  *
  * If func returns true, the element is removed from the GSList.
@@ -261,7 +272,7 @@ gint rm_util_list_foreach_remove(GList **list, RmRFunc func, gpointer user_data)
  *
  * @return Number of removed items.
  */
-gint rm_util_slist_foreach_remove(GSList **list, RmRFunc func, gpointer user_data);
+gint rm_util_slist_foreach_remove(GSList **list, RmSListRFunc func, gpointer user_data);
 
 /**
 * @brief Pop the first element from a GSList

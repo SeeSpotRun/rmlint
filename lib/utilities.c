@@ -178,13 +178,13 @@ gint rm_util_list_foreach_remove(GList **list, RmRFunc func, gpointer user_data)
     return removed;
 }
 
-gint rm_util_slist_foreach_remove(GSList **list, RmRFunc func, gpointer user_data) {
+gint rm_util_slist_foreach_remove(GSList **list, RmSListRFunc func, gpointer user_data) {
     gint removed = 0;
 
     /* iterate over list, keeping track of previous and next entries */
     for(GSList *prev = NULL, *iter = *list, *next = NULL; iter; iter = next) {
         next = iter->next;
-        if(func(iter->data, user_data)) {
+        if(func(iter->data, prev ? prev->data : NULL, user_data)) {
             /* delete iter from GSList */
             g_slist_free1(iter);
             if(prev) {

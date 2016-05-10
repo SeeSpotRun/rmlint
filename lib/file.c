@@ -94,7 +94,7 @@ void rm_file_zip_path(RmFile *file, const char *path) {
     file->path = NULL;
 }
 
-void rm_file_build_path(RmFile *file, char *buf) {
+void rm_file_build_path(const RmFile *file, char *buf) {
     rm_assert_gentle(file);
 
     rm_trie_build_path((RmTrie *)&file->cfg->file_trie, file->folder, buf, PATH_MAX);
@@ -281,7 +281,7 @@ int rm_file_cmp_orig_criteria_pre(const RmFile *a, const RmFile *b, const RmCfg 
     }
 }
 
-int rm_file_cmp_orig_criteria_post(RmFile *a, RmFile *b, RmCfg *cfg) {
+int rm_file_cmp_orig_criteria_post(const RmFile *a, const RmFile *b, RmCfg *cfg) {
     /* Make sure to *never* make a symlink to be the original */
     if(a->is_symlink != b->is_symlink) {
         return a->is_symlink - b->is_symlink;
@@ -298,7 +298,8 @@ int rm_file_cmp_orig_criteria_post(RmFile *a, RmFile *b, RmCfg *cfg) {
     }
 }
 
-gint rm_file_cmp_size_etc(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
+gint rm_file_cmp_dupe_group(const RmFile *file_a, const RmFile *file_b,
+                            const RmCfg *cfg) {
     gint result = SIGN_DIFF(file_a->file_size, file_b->file_size);
 
     if(result != 0) {
@@ -320,14 +321,6 @@ gint rm_file_cmp_size_etc(const RmFile *file_a, const RmFile *file_b, const RmCf
     return result;
 }
 
-gint rm_file_cmp_full(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg) {
-    gint result = rm_file_cmp_size_etc(file_a, file_b, cfg);
-    if(result != 0) {
-        return result;
-    }
-    return rm_file_cmp_orig_criteria_pre(file_a, file_b, cfg);
-}
-
 gint rm_file_node_cmp(const RmFile *file_a, const RmFile *file_b) {
     gint result = SIGN_DIFF(file_a->dev, file_b->dev);
     if(result == 0) {
@@ -342,10 +335,11 @@ gint rm_file_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b) {
     return g_strcmp0(b_path, a_path);
 }
 
-static ino_t *rm_file_parent_inode(RmFile *file) {
+static ino_t *rm_file_parent_inode(const RmFile *file) {
     ino_t *result = g_slice_new(ino_t);
     char parent_path[PATH_MAX];
-    rm_trie_build_path((RmTrie *)&file->cfg->file_trie, file->folder->parent, parent_path, PATH_MAX);
+    rm_trie_build_path((RmTrie *)&file->cfg->file_trie, file->folder->parent, parent_path,
+                       PATH_MAX);
     RmStat stat_buf;
     int retval = rm_sys_stat(parent_path, &stat_buf);
     rm_assert_gentle(retval != -1);
@@ -353,7 +347,7 @@ static ino_t *rm_file_parent_inode(RmFile *file) {
     return result;
 }
 
-gint rm_file_cmp_pathdouble(RmFile *a, RmFile *b) {
+gint rm_file_cmp_pathdouble(const RmFile *a, const RmFile *b) {
     rm_assert_gentle(a->dev == b->dev);
     rm_assert_gentle(a->inode == b->inode);
 
@@ -378,21 +372,14 @@ gint rm_file_cmp_pathdouble(RmFile *a, RmFile *b) {
      * when the same device is mounted to two different mountpoints.  To
      * speed things up the inode data is cached in the pathtricia tree.
      */
-    if (pa->data == NULL) {
+    if(pa->data == NULL) {
         pa->data = rm_file_parent_inode(a);
     }
 
-    if (pb->data == NULL) {
+    if(pb->data == NULL) {
         pb->data = rm_file_parent_inode(b);
     }
-    rm_log_debug_line("Path double inode check: %lu vs %lu", *(ino_t *)pa->data, *(ino_t *)pb->data);
+    rm_log_debug_line("Path double inode check: %lu vs %lu", *(ino_t *)pa->data,
+                      *(ino_t *)pb->data);
     return SIGN_DIFF(*(ino_t *)pa->data, *(ino_t *)pb->data);
-}
-
-gint rm_file_cmp_pathdouble_full(RmFile *a, RmFile *b) {
-    gint result = rm_file_cmp_pathdouble(a, b);
-    if (result != 0) {
-        return result;
-    }
-    return rm_file_cmp_orig_criteria_pre(a, b, a->cfg);
 }

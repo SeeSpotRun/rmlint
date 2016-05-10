@@ -305,7 +305,7 @@ void rm_file_zip_path(RmFile *file, const char *path);
 /**
  * @brief Internal helper function for RM_DEFINE_PATH using folder tree and basename.
  */
-void rm_file_build_path(RmFile *file, char *buf);
+void rm_file_build_path(const RmFile *file, char *buf);
 
 /**
  * @brief Compare basenames of two files
@@ -327,19 +327,13 @@ int rm_file_cmp_orig_criteria_pre(const RmFile *a, const RmFile *b, const RmCfg 
  * This is slightly different to rm_shred_cmp_orig_criteria_pre in the case
  * of either -K or -M options
  */
-int rm_file_cmp_orig_criteria_post(RmFile *a, RmFile *b, RmCfg *cfg);
+int rm_file_cmp_orig_criteria_post(const RmFile *a, const RmFile *b, RmCfg *cfg);
 
 /**
  * @brief Rank two files in terms of size; if equal then rank in terms of
  * cfg->match_... options.  A return of 0 implies file_a and file_b are
  * duplicate candidates */
-gint rm_file_cmp_size_etc(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg);
-
-/**
- * @brief Rank two files in terms of size, cfg->match_..., then originality
- * duplicate candidates
- */
-gint rm_file_cmp_full(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg);
+gint rm_file_cmp_dupe_group(const RmFile *file_a, const RmFile *file_b, const RmCfg *cfg);
 
 /**
  * @brief Rank two files in terms of dev then inode
@@ -357,13 +351,6 @@ gint rm_file_cmp_reverse_alphabetical(const RmFile *a, const RmFile *b);
  * @brief Rank two files with identical inode in an order which
  * places path doubles adjacent to each other
  */
-gint rm_file_cmp_pathdouble(RmFile *a, RmFile *b);
-
-/**
- * @brief Rank two files with identical inode in an order which
- * places path doubles adjacent to each other and in order of originality
- */
-gint rm_file_cmp_pathdouble_full(RmFile *a, RmFile *b);
-
+gint rm_file_cmp_pathdouble(const RmFile *a, const RmFile *b);
 
 #endif /* end of include guard */

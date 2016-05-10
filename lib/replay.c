@@ -409,15 +409,15 @@ static void rm_parrot_write_group(RmParrotCage *cage, GQueue *group) {
     if(cfg->match_with_extension || cfg->match_without_extension || cfg->match_basename ||
        cfg->unmatched_basenames) {
         /* Remove file unless it has a twin in group */
-        g_queue_sort(group, (GCompareDataFunc)rm_file_cmp_size_etc, cfg);
+        g_queue_sort(group, (GCompareDataFunc)rm_file_cmp_dupe_group, cfg);
         GList *next = NULL;
         for(GList *iter = group->head; iter; iter = next) {
             if(iter->next &&
-               rm_file_cmp_size_etc(iter->data, iter->next->data, cfg) == 0) {
+               rm_file_cmp_dupe_group(iter->data, iter->next->data, cfg) == 0) {
                 /* save iter and iter->next */
                 next = iter->next->next;
             } else if(iter->prev &&
-                      rm_file_cmp_size_etc(iter->data, iter->prev->data, cfg) == 0) {
+                      rm_file_cmp_dupe_group(iter->data, iter->prev->data, cfg) == 0) {
                 /* save iter */
                 next = iter->next;
             } else {

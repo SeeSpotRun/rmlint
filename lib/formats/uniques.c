@@ -44,10 +44,6 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
         /* don't list 'untagged' files as unique */
         return;
     }
-    if(session->cfg->keep_all_untagged && file->is_prefd) {
-        /* don't list 'tagged' files as unique */
-        return;
-    }
 
     RM_DEFINE_PATH(file);
     fputs(file_path, out);

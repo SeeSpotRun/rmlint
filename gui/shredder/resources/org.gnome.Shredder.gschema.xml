@@ -27,12 +27,10 @@
     <enum id="org.gnome.Shredder.KeepAllType">
         <value nick="No restriction" value="0"/>
         <value nick="Keep all tagged" value="1"/>
-        <value nick="Keep all untagged" value="2"/>
     </enum>
     <enum id="org.gnome.Shredder.MustMatchType">
         <value nick="No restriction" value="0"/>
         <value nick="Must match tagged" value="1"/>
-        <value nick="Must match untagged" value="2"/>
     </enum>
     <schema id="org.gnome.Shredder" path="/org/gnome/Shredder/" gettext-domain="shredder">
         <key name="general-find-hardlinks" type="b">

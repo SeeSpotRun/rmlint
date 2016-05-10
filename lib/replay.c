@@ -348,7 +348,7 @@ static bool rm_parrot_check_types(RmCfg *cfg, RmFile *file) {
 
 static void rm_parrot_fix_must_match_tagged(RmParrotCage *cage, GQueue *group) {
     RmCfg *cfg = cage->session->cfg;
-    if(!(cfg->must_match_tagged || cfg->must_match_untagged)) {
+    if(!cfg->must_match_tagged) {
         return;
     }
 
@@ -364,8 +364,7 @@ static void rm_parrot_fix_must_match_tagged(RmParrotCage *cage, GQueue *group) {
         }
     }
 
-    if((!has_prefd && cfg->must_match_tagged) ||
-       (!has_non_prefd && cfg->must_match_untagged)) {
+    if(!has_prefd && cfg->must_match_tagged) {
         g_queue_foreach(group, (GFunc)rm_file_destroy, NULL);
         g_queue_clear(group);
     }
@@ -431,14 +430,12 @@ static void rm_parrot_write_group(RmParrotCage *cage, GQueue *group) {
 
     rm_parrot_fix_must_match_tagged(cage, group);
 
-    g_queue_sort(group, (GCompareDataFunc)rm_file_cmp_orig_criteria_post,
-                 cage->session->cfg);
+    g_queue_sort(group, (GCompareDataFunc)rm_file_cmp_orig_criteria, cage->session->cfg);
 
     for(GList *iter = group->head; iter; iter = iter->next) {
         RmFile *file = iter->data;
 
-        if(file == group->head->data || (cfg->keep_all_tagged && file->is_prefd) ||
-           (cfg->keep_all_untagged && !file->is_prefd)) {
+        if(file == group->head->data || (cfg->keep_all_tagged && file->is_prefd)) {
             file->is_original = true;
         } else {
             file->is_original = false;

@@ -131,7 +131,7 @@ gint rm_pp_cmp_phase1(const RmFile *file_a, const RmFile *file_b, const RmCfg *c
 
     /* must be path doubles; rank most "original" first */
 
-    return rm_file_cmp_orig_criteria_pre(file_a, file_b, cfg);
+    return rm_file_cmp_orig_criteria(file_a, file_b, cfg);
 }
 
 /* sort function to sort size groups by inode then by originality; this facilitates
@@ -141,7 +141,7 @@ gint rm_pp_cmp_phase2(const RmFile *file_a, const RmFile *file_b, const RmCfg *c
     if(result != 0) {
         return result;
     }
-    return rm_file_cmp_orig_criteria_pre(file_a, file_b, cfg);
+    return rm_file_cmp_orig_criteria(file_a, file_b, cfg);
 }
 
 /* RMRFunc to strip out "other lint" and path doubles */

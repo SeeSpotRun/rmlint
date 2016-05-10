@@ -319,15 +319,7 @@ gint rm_file_basenames_cmp(const RmFile *file_a, const RmFile *file_b);
  *
  * Returns: -1 if a outranks b, 0 if a == b and +1 else.
  */
-int rm_file_cmp_orig_criteria_pre(const RmFile *a, const RmFile *b, const RmCfg *cfg);
-
-/**
- * @brief post-processing sorting of files by original criteria.
- *
- * This is slightly different to rm_shred_cmp_orig_criteria_pre in the case
- * of either -K or -M options
- */
-int rm_file_cmp_orig_criteria_post(const RmFile *a, const RmFile *b, RmCfg *cfg);
+int rm_file_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmCfg *cfg);
 
 /**
  * @brief Rank two files in terms of size; if equal then rank in terms of

@@ -402,7 +402,7 @@ Here's the list of currently available formatters and their config options:
 
     Prints a progressbar during the run of ``rmlint``. This is recommended for
     large runs where the ``pretty`` formatter would print thousands of lines.
-	Not recommended in combination with ``pretty``
+    Not recommended in combination with ``pretty``
 
     **Config values:**
 
@@ -556,9 +556,6 @@ old drive is mounted at /media/portable.
    # see what files are left:
    $ tree /media/portable
    # recover any files that you want to save, then you can safely reformat the drive
-
-In the case of nested mountpoints, it may sometimes makes sense to use the
-opposite variations, ``-K`` (``--keep-all-untagged``) and ``-M`` (``--must-match-untagged``).
 
 
 Finding duplicate directories

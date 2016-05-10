@@ -1238,9 +1238,7 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
         {"paranoid"                 , 'p'  , EMPTY     , G_OPTION_ARG_CALLBACK  , FUNC(paranoid)                 , _("Use more paranoid hashing")                           , NULL}      ,
         {"no-crossdev"              , 'x'  , DISABLE   , G_OPTION_ARG_NONE      , &cfg->crossdev                 , _("Do not cross mounpoints")                             , NULL}      ,
         {"keep-all-tagged"          , 'k'  , 0         , G_OPTION_ARG_NONE      , &cfg->keep_all_tagged          , _("Keep all tagged files")                               , NULL}      ,
-        {"keep-all-untagged"        , 'K'  , 0         , G_OPTION_ARG_NONE      , &cfg->keep_all_untagged        , _("Keep all untagged files")                             , NULL}      ,
         {"must-match-tagged"        , 'm'  , 0         , G_OPTION_ARG_NONE      , &cfg->must_match_tagged        , _("Must have twin in tagged dir")                        , NULL}      ,
-        {"must-match-untagged"      , 'M'  , 0         , G_OPTION_ARG_NONE      , &cfg->must_match_untagged      , _("Must have twin in untagged dir")                      , NULL}      ,
         {"match-basename"           , 'b'  , 0         , G_OPTION_ARG_NONE      , &cfg->match_basename           , _("Only find twins with same basename")                  , NULL}      ,
         {"match-extension"          , 'e'  , 0         , G_OPTION_ARG_NONE      , &cfg->match_with_extension     , _("Only find twins with same extension")                 , NULL}      ,
         {"match-without-extension"  , 'i'  , 0         , G_OPTION_ARG_NONE      , &cfg->match_without_extension  , _("Only find twins with same basename minus extension")  , NULL}      ,
@@ -1405,11 +1403,7 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
         cfg->with_stdout_color = cfg->with_stderr_color = 0;
     }
 
-    if(cfg->keep_all_tagged && cfg->keep_all_untagged) {
-        error = g_error_new(
-            RM_ERROR_QUARK, 0,
-            _("can't specify both --keep-all-tagged and --keep-all-untagged"));
-    } else if(cfg->skip_start_factor >= cfg->skip_end_factor) {
+    if(cfg->skip_start_factor >= cfg->skip_end_factor) {
         error = g_error_new(RM_ERROR_QUARK, 0,
                             _("-q (--clamp-low) should be lower than -Q (--clamp-top)"));
     } else if(!rm_cmd_set_paths(cfg, paths)) {

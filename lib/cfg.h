@@ -51,9 +51,7 @@ typedef struct RmCfg {
     gboolean find_nonstripped;
     gboolean find_emptyfiles;
     gboolean keep_all_tagged;
-    gboolean keep_all_untagged;
     gboolean must_match_tagged;
-    gboolean must_match_untagged;
     gboolean find_hardlinked_dupes;
     gboolean limits_specified;
     gboolean filter_mtime;

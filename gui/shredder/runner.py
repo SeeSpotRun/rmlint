@@ -77,21 +77,19 @@ class HiddenType(Enum):
 
 class KeepAllType(Enum):
     """Key: computation-keep-all-tagged"""
-    NONE, TAGGED, UNTAGGED = range(1, 4)
+    NONE, TAGGED = range(1, 3)
     MAPPING = {
         NONE: '',
         TAGGED: '--keep-all-tagged',
-        UNTAGGED: '--keep-all-untagged'
     }
 
 
 class MustMatchType(Enum):
     """Key: computation-must-match-tagged"""
-    NONE, TAGGED, UNTAGGED = range(1, 4)
+    NONE, TAGGED = range(1, 3)
     MAPPING = {
         NONE: '',
         TAGGED: '--must-match-tagged',
-        UNTAGGED: '--must-match-untagged'
     }
 
 

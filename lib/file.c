@@ -220,11 +220,12 @@ gint rm_file_basenames_cmp(const RmFile *file_a, const RmFile *file_b) {
  *      0 if they are equal,
  *      a positive integer if file 'b' outranks 'a'
  */
-int rm_file_cmp_orig_criteria_pre(const RmFile *a, const RmFile *b, const RmCfg *cfg) {
+int rm_file_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmCfg *cfg) {
     if(a->lint_type != b->lint_type) {
         /* "other" lint outranks duplicates and has lower ENUM */
         return a->lint_type - b->lint_type;
     } else if(a->is_symlink != b->is_symlink) {
+        /* Make sure to *never* make a symlink to be the original */
         return a->is_symlink - b->is_symlink;
     } else if(a->is_prefd != b->is_prefd) {
         return (b->is_prefd - a->is_prefd);
@@ -278,23 +279,6 @@ int rm_file_cmp_orig_criteria_pre(const RmFile *a, const RmFile *b, const RmCfg 
             }
         }
         return 0;
-    }
-}
-
-int rm_file_cmp_orig_criteria_post(const RmFile *a, const RmFile *b, RmCfg *cfg) {
-    /* Make sure to *never* make a symlink to be the original */
-    if(a->is_symlink != b->is_symlink) {
-        return a->is_symlink - b->is_symlink;
-    } else if((a->is_prefd != b->is_prefd) &&
-              (cfg->keep_all_untagged || cfg->must_match_untagged)) {
-        return (a->is_prefd - b->is_prefd);
-    } else {
-        int comparison = rm_file_cmp_orig_criteria_pre(a, b, cfg);
-        if(comparison == 0) {
-            return b->is_original - a->is_original;
-        }
-
-        return comparison;
     }
 }
 

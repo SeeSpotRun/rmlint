@@ -328,10 +328,8 @@ typedef struct RmShredTag {
 
 } RmShredTag;
 
-#define NEEDS_PREF(group) \
-    (group->shredder->cfg->must_match_tagged || group->shredder->cfg->keep_all_untagged)
-#define NEEDS_NPREF(group) \
-    (group->shredder->cfg->must_match_untagged || group->shredder->cfg->keep_all_tagged)
+#define NEEDS_PREF(group) (group->shredder->cfg->must_match_tagged)
+#define NEEDS_NPREF(group) (group->shredder->cfg->keep_all_tagged)
 #define NEEDS_NEW(group) (group->shredder->cfg->min_mtime)
 
 #define HAS_CACHE(shredder) (shredder->cfg->read_cksum_from_xattr)
@@ -1208,16 +1206,12 @@ void rm_shred_group_find_original(RmCfg *cfg, GQueue *files, RmShredGroupStatus 
         }
         if(status == RM_SHRED_GROUP_FINISHING) {
             /* identify "tagged" originals: */
-            if(((file->is_prefd) && (cfg->keep_all_tagged)) ||
-               ((!file->is_prefd) && (cfg->keep_all_untagged))) {
+            if((file->is_prefd) && (cfg->keep_all_tagged)) {
                 file->is_original = true;
 
 #if _RM_SHRED_DEBUG
                 RM_DEFINE_PATH(file);
-                rm_log_debug_line(
-                    "tagging %s as original because %s",
-                    file_path,
-                    ((file->is_prefd) && (cfg->keep_all_tagged)) ? "tagged" : "untagged");
+                rm_log_debug_line("tagging %s as original because tagged", file_path);
 #endif
             }
         } else {
@@ -1226,7 +1220,7 @@ void rm_shred_group_find_original(RmCfg *cfg, GQueue *files, RmShredGroupStatus 
     }
 
     /* sort the unbundled group */
-    g_queue_sort(files, (GCompareDataFunc)rm_file_cmp_orig_criteria_post, cfg);
+    g_queue_sort(files, (GCompareDataFunc)rm_file_cmp_orig_criteria, cfg);
 
     RmFile *headfile = files->head->data;
     if(!headfile->is_original && status == RM_SHRED_GROUP_FINISHING) {

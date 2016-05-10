@@ -442,12 +442,9 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
     while(g_hash_table_iter_next(&iter, (gpointer *)&path, (gpointer *)&buffer)) {
         if(S_ISREG(buffer->stat_buf.st_mode)) {
             /* Append normal paths directly */
-            bool is_hidden = false;
 
-            /* The is_hidden information is only needed for --partial-hidden */
-            if(cfg->partial_hidden) {
-                is_hidden = rm_util_path_is_hidden(buffer->path);
-            }
+            /* Top level paths not treated as hidden unless --partial-hidden */
+            bool is_hidden = cfg->partial_hidden && rm_util_path_is_hidden(buffer->path);
 
             rm_traverse_file(traverser, &buffer->stat_buf, buffer->path, buffer->is_prefd,
                              buffer->path_index, RM_LINT_TYPE_UNKNOWN, false, is_hidden,

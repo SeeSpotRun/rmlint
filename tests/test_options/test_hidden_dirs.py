@@ -23,7 +23,8 @@ def test_hidden():
     create_file('xxx', '.a/1')
     create_file('xxx', '.b/1')
     create_file('xxx', '.1')
-    head, *data, footer = run_rmlint('--no-hidden')
+    head, *data, footer = run_rmlint('')
+    # (default is to ignore hidden files...
 
     assert footer['duplicates'] == 0
     assert footer['ignored_folders'] == 2
@@ -35,7 +36,8 @@ def test_hidden():
 def test_explicit():
     create_file('xxx', '.a/1')
     create_file('xxx', '.a/2')
-    head, *data, footer = run_rmlint('--no-hidden', dir_suffix='.a')
+    head, *data, footer = run_rmlint('', dir_suffix='.a')
+    # ...unless they are passed from the commandline)
 
     assert footer['duplicates'] == 1
     assert footer['ignored_folders'] == 0
@@ -49,7 +51,7 @@ def test_partial_hidden():
     create_file('1', 'b/.hidden')
     create_file('1', '.hidden')
 
-    head, *data, footer = run_rmlint('--no-hidden')
+    head, *data, footer = run_rmlint('')
     assert len(data) == 0
 
     head, *data, footer = run_rmlint('--partial-hidden')

@@ -801,14 +801,6 @@ static void rm_cmd_set_default_outputs(RmCmdSession *cmd) {
     }
 }
 
-static gboolean rm_cmd_parse_no_progress(_UNUSED const char *option_name,
-                                         _UNUSED const gchar *value, RmCmdSession *cmd,
-                                         _UNUSED GError **error) {
-    rm_fmt_clear(cmd->formats);
-    rm_cmd_set_default_outputs(cmd);
-    rm_cmd_set_verbosity_from_cnt(cmd->cfg, cmd->verbosity_count);
-    return true;
-}
 
 static gboolean rm_cmd_parse_loud(_UNUSED const char *option_name,
                                   _UNUSED const gchar *count, RmCmdSession *cmd,
@@ -892,7 +884,6 @@ static gboolean rm_cmd_parse_merge_directories(_UNUSED const char *option_name,
 
     /* Keep RmFiles after shredder. */
     cmd->cfg->cache_file_structs = true;
-
     return true;
 }
 
@@ -1261,19 +1252,9 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
     };
 
     const GOptionEntry inversed_option_entries[] = {
-        {"no-hidden"                  , 'R' , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->ignore_hidden           , "Ignore hidden files"                 , NULL} ,
-        {"with-color"                 , 'w' , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->with_color              , "Be colorful like a unicorn"          , NULL} ,
-        {"hardlinked"                 , 'l' , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->find_hardlinked_dupes   , _("Report hardlinks as duplicates")   , NULL} ,
-        {"crossdev"                   , 'X' , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->crossdev                , "Cross mountpoints"                   , NULL} ,
         {"less-paranoid"              , 'P' , EMPTY | HIDDEN   , G_OPTION_ARG_CALLBACK , FUNC(less_paranoid)           , "Use less paranoid hashing algorithm" , NULL} ,
         {"see-symlinks"               , '@' , EMPTY | HIDDEN   , G_OPTION_ARG_CALLBACK , FUNC(see_symlinks)            , "Treat symlinks a regular files"      , NULL} ,
         {"unmatched-basename"         , 'B',  HIDDEN           , G_OPTION_ARG_NONE     , &cfg->unmatched_basenames     , "Only find twins with differing names", NULL} ,
-        {"no-match-extension"         , 'E' , DISABLE | HIDDEN , G_OPTION_ARG_NONE     , &cfg->match_with_extension    , "Disable --match-extension"           , NULL} ,
-        {"no-match-extension"         , 'E' , DISABLE | HIDDEN , G_OPTION_ARG_NONE     , &cfg->match_with_extension    , "Disable --match-extension"           , NULL} ,
-        {"no-match-without-extension" , 'I' , DISABLE | HIDDEN , G_OPTION_ARG_NONE     , &cfg->match_without_extension , "Disable --match-without-extension"   , NULL} ,
-        {"no-progress"                , 'G' , EMPTY | HIDDEN   , G_OPTION_ARG_CALLBACK , FUNC(no_progress)             , "Disable progressbar"                 , NULL} ,
-        {"no-xattr-read"              , 0   , DISABLE | HIDDEN , G_OPTION_ARG_NONE     , &cfg->read_cksum_from_xattr   , "Disable --xattr-read"                , NULL} ,
-        {"no-xattr-write"             , 0   , DISABLE | HIDDEN , G_OPTION_ARG_NONE     , &cfg->write_cksum_to_xattr    , "Disable --xattr-write"               , NULL} ,
         {"no-partial-hidden"          , 0   , EMPTY | HIDDEN   , G_OPTION_ARG_CALLBACK , FUNC(no_partial_hidden)       , "Invert --partial-hidden"             , NULL} ,
         {NULL                         , 0   , 0                , 0                     , NULL                          , NULL                                  , NULL}
     };
@@ -1290,7 +1271,6 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
         {"xattr-write"            , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->write_cksum_to_xattr   , "Cache checksum in file attributes"                           , NULL}   ,
         {"xattr-read"             , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->read_cksum_from_xattr  , "Read cached checksums from file attributes"                  , NULL}   ,
         {"xattr-clear"            , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->clear_xattr_fields     , "Clear xattrs from all seen files"                            , NULL}   ,
-        {"with-fiemap"            , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->build_fiemap           , "Use fiemap(2) to optimize disk access patterns"              , NULL}   ,
         {"without-fiemap"         , 0   , DISABLE | HIDDEN , G_OPTION_ARG_NONE     , &cfg->build_fiemap           , "Do not use fiemap(2) in order to save memory"                , NULL}   ,
         {"shred-always-wait"      , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->shred_always_wait      , "Always waits for file increment to finish hashing"           , NULL}   ,
         {"fake-pathindex-as-disk" , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->fake_pathindex_as_disk , "Pretends each input path is a separate physical disk"        , NULL}   ,

@@ -117,13 +117,24 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
             file_type = RM_LINT_TYPE_NONSTRIPPED;
         } else {
             RmOff file_size = statp->st_size;
-            if(!cfg->limits_specified ||
-               ((cfg->minsize == (RmOff)-1 || cfg->minsize <= file_size) &&
-                (cfg->maxsize == (RmOff)-1 || file_size <= cfg->maxsize))) {
-                file_type = RM_LINT_TYPE_DUPE_CANDIDATE;
-            } else {
+            if(cfg->limits_specified &&
+               (file_size > cfg->maxsize ||
+                (cfg->minsize != (RmOff)-1 && file_size < cfg->minsize))) {
                 file_type = RM_LINT_TYPE_WRONG_SIZE;
+            } else {
+                file_type = RM_LINT_TYPE_DUPE_CANDIDATE;
             }
+        }
+    }
+
+    if(file_type != RM_LINT_TYPE_DUPE_CANDIDATE) {
+        /* some filtering criteria that don't apply to dupe candidates
+         * since they might be valid "originals" */
+        if(cfg->filter_mtime && rm_sys_stat_mtime_seconds(statp) < cfg->min_mtime) {
+            file_type = RM_LINT_TYPE_WRONG_TIME;
+        } else if((cfg->keep_all_tagged && is_prefd) ||
+                  (cfg->keep_all_untagged && !is_prefd)) {
+            file_type = RM_LINT_TYPE_KEEP_TAGGED;
         }
     }
 

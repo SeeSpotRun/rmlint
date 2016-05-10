@@ -156,17 +156,6 @@ static int rm_pp_strip_lint(RmFile *file, RmFile *prev, RmPPSession *preprocesso
         /* will send to threadpool before return */
     } else if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         return FALSE;
-    } else {
-        /* handle "other" lint... */
-        /* First check some filter criteria (TODO: move to traversal?) */
-        const RmCfg *cfg = preprocessor->cfg;
-        if(cfg->filter_mtime && file->mtime < cfg->min_mtime) {
-            file->lint_type = RM_LINT_TYPE_WRONG_TIME;
-        } else if((cfg->keep_all_tagged && file->is_prefd) ||
-                  (cfg->keep_all_untagged && !file->is_prefd)) {
-            /* "Other" lint protected by --keep-all-{un,}tagged */
-            file->lint_type = RM_LINT_TYPE_KEEP_TAGGED;
-        }
     }
 
     g_thread_pool_push(preprocessor->preprocess_file_pipe, file, NULL);

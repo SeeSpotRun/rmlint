@@ -95,6 +95,11 @@ static void rm_traverse_session_free(RmTravSession *traverser) {
 // ACTUAL WORK HERE //
 //////////////////////
 
+void rm_traverse_file_destroy(RmTraverseFile *file) {
+    g_free(file->path);
+    g_slice_free(RmTraverseFile, file);
+}
+
 static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path,
                              bool is_prefd, unsigned long path_index,
                              RmLintType file_type, bool is_symlink, bool is_hidden,
@@ -137,13 +142,20 @@ static void rm_traverse_file(RmTravSession *traverser, RmStat *statp, char *path
         }
     }
 
-    RmFile *file = rm_file_new(cfg, path, statp, file_type, is_prefd, path_index, depth);
+    RmTraverseFile *file = g_slice_new(RmTraverseFile);
+    file->path = g_strdup(path);
+    file->size = statp->st_size;
+    file->inode = statp->st_ino;
+    file->dev = statp->st_dev;
+    file->mtime = rm_sys_stat_mtime_seconds(statp);
+    file->lint_type = file_type;
+    file->is_prefd = is_prefd;
+    file->path_index = path_index;
+    file->depth = depth;
+    file->is_symlink = is_symlink;
+    file->is_hidden = is_hidden;
 
-    if(file != NULL) {
-        file->is_symlink = is_symlink;
-        file->is_hidden = is_hidden;
-        g_thread_pool_push(traverser->file_pool, file, NULL);
-    }
+    rm_util_thread_pool_push(traverser->file_pool, file);
 }
 
 static bool rm_traverse_is_hidden(const RmCfg *cfg, const char *basename, char *hierarchy,

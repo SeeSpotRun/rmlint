@@ -173,8 +173,9 @@ static RmFile *rm_parrot_try_next(RmParrot *polly) {
     }
 
     /* Fill up the RmFile */
-    file = rm_file_new(polly->session->cfg, path, stat_info, type, 0, 0, 0);
-    rm_file_zip_path(file, path);
+    file = rm_file_new(polly->session->cfg, path, stat_info->st_size, stat_info->st_dev,
+                       stat_info->st_ino, rm_sys_stat_mtime_seconds(stat_info), type, 0,
+                       0, 0);
     file->is_original = json_object_get_boolean_member(object, "is_original");
     file->is_symlink = (lstat_buf.st_mode & S_IFLNK);
     file->digest = rm_digest_new(RM_DIGEST_EXT, 0, 0, 0, FALSE);

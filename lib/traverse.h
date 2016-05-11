@@ -29,11 +29,27 @@
 #include "md-scheduler.h"
 #include "formats.h"
 
+typedef struct RmTraverseFile {
+    size_t size;
+    ino_t inode;
+    dev_t dev;
+    time_t mtime;
+    char *path;
+    RmLintType lint_type;
+    bool is_prefd;
+    unsigned long path_index;
+    short depth;
+    bool is_symlink;
+    bool is_hidden;
+} RmTraverseFile;
+
 /**
  * @brief Traverse all specified paths.
  * @param cfg the session configuration
  * @param
  */
 void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds);
+
+void rm_traverse_file_destroy(RmTraverseFile *file);
 
 #endif

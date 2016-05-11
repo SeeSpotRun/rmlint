@@ -112,9 +112,6 @@ typedef guint16 RmPatternBitmask;
  */
 
 typedef struct RmFile {
-    /* conventional string path, only used briefly during traversal */
-    char *path;
-
     /* path 'zipped' as a node of folder n-ary tree (memory efficient
      * but slower) */
     RmNode *folder;
@@ -270,14 +267,21 @@ typedef struct RmFile {
 /**
  * @brief Create a new RmFile handle.
  */
-RmFile *rm_file_new(const RmCfg *cfg, const char *path, RmStat *statp, RmLintType type,
-                    bool is_ppath, unsigned pnum, short depth);
+RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
+                    ino_t inode, time_t mtime, RmLintType type, bool is_ppath,
+                    unsigned pnum, short depth);
 
 /**
  * @brief Deallocate the memory allocated by rm_file_new.
  * @note does not deallocate file->digest since this is handled by shredder.c
  */
 void rm_file_destroy(RmFile *file);
+
+/**
+ * @brief Set a path to the file. Normally, you should never do this since the
+ * path is immutable.
+ */
+void rm_file_set_path(RmFile *file, char *path);
 
 /**
  * @brief Convert RmLintType to a human readable short string.

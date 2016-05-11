@@ -33,9 +33,10 @@
 #include <stdio.h>
 #include <ctype.h>
 
-RmFile *rm_file_new(const RmCfg *cfg, const char *path, RmStat *statp, RmLintType type,
-                    bool is_ppath, unsigned path_index, short depth) {
-    RmOff actual_file_size = statp->st_size;
+RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
+                    ino_t inode, time_t mtime, RmLintType type, bool is_ppath,
+                    unsigned path_index, short depth) {
+    RmOff actual_file_size = size;
     RmOff start_seek = 0;
 
     /* Allow an actual file size of 0 for empty files */
@@ -60,14 +61,14 @@ RmFile *rm_file_new(const RmCfg *cfg, const char *path, RmStat *statp, RmLintTyp
     RmFile *self = g_slice_new0(RmFile);
     self->cfg = cfg;
 
-    self->path = g_strdup(path);
+    rm_file_set_path(self, (char *)path);
 
     self->depth = depth;
     self->path_depth = rm_util_path_depth(path);
 
-    self->inode = statp->st_ino;
-    self->dev = statp->st_dev;
-    self->mtime = rm_sys_stat_mtime_seconds(statp);
+    self->inode = inode;
+    self->dev = dev;
+    self->mtime = mtime;
 
     if(type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         if(cfg->use_absolute_end_offset) {
@@ -88,10 +89,8 @@ RmFile *rm_file_new(const RmCfg *cfg, const char *path, RmStat *statp, RmLintTyp
     return self;
 }
 
-void rm_file_zip_path(RmFile *file, const char *path) {
+void rm_file_set_path(RmFile *file, char *path) {
     file->folder = rm_trie_insert((RmTrie *)&file->cfg->file_trie, path, NULL);
-    g_free(file->path);
-    file->path = NULL;
 }
 
 void rm_file_build_path(const RmFile *file, char *buf) {

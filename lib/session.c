@@ -135,7 +135,7 @@ static int rm_session_replay(RmSession *session) {
  * single threaded; assumes safe access to tables->all_files
  * and session->counters.
  */
-static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
+static void rm_session_traverse_pipe(RmTraverseFile *file, RmSession *session) {
     if(rm_mounts_is_evil(session->mounts, file->dev)
        /* A file in an evil fs. Ignore. */
        ||
@@ -149,30 +149,30 @@ static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
        file->lint_type == RM_LINT_TYPE_WRONG_SIZE ||
        file->lint_type == RM_LINT_TYPE_HIDDEN_FILE) {
         session->counters->ignored_files++;
-        g_free(file->path);
-        rm_file_destroy(file);
-        return;
-    }
-
-    if(file->lint_type == RM_LINT_TYPE_HIDDEN_DIR) {
+    } else if(file->lint_type == RM_LINT_TYPE_HIDDEN_DIR) {
         session->counters->ignored_folders++;
-        g_free(file->path);
-        rm_file_destroy(file);
-        return;
+    } else {
+        RmFile *real = rm_file_new(session->cfg, file->path, file->size, file->dev,
+                                   file->inode, file->mtime, file->lint_type,
+                                   file->is_prefd, file->path_index, file->depth);
+
+        if(!real) {
+            session->counters->ignored_files++;
+        } else {
+            real->is_symlink = file->is_symlink;
+            real->is_hidden = file->is_hidden;
+            if(session->cfg->clear_xattr_fields &&
+               real->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+                rm_xattr_clear_hash(session->cfg, real);
+            }
+            session->tables->all_files =
+                g_slist_prepend(session->tables->all_files, real);
+
+            session->counters->total_files++;
+            rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+        }
     }
-
-    /* convert from regular path to pathtricia */
-    rm_file_zip_path(file, file->path);
-    g_free(file->path);
-
-    if(session->cfg->clear_xattr_fields &&
-       file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-        rm_xattr_clear_hash(session->cfg, file);
-    }
-    session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
-
-    session->counters->total_files++;
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+    rm_traverse_file_destroy(file);
 }
 
 /* threadpipe to receive "other" lint and rejected files from preprocess.

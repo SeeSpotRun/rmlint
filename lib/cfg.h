@@ -31,8 +31,6 @@
 #include "checksum.h"
 #include "utilities.h"
 
-struct RmFmtTable;
-
 /* Storage struct for all options settable in cmdline. */
 typedef struct RmCfg {
     gboolean with_color;

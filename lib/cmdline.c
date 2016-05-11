@@ -1124,7 +1124,7 @@ static bool rm_cmd_set_paths(RmCfg *cfg, char **paths) {
             read_paths = rm_cmd_read_paths_from_stdin(cfg, path_index);
         } else if(strncmp(dir_path, "//", 2) == 0 && strlen(dir_path) == 2) {
             if(cfg->first_prefd != 0) {
-                rm_log_error_line("More that one // separator detected, ignoring");
+                rm_log_error_line("More that one // separator detected, ignoring...");
             } else {
                 cfg->first_prefd = path_index;
             }
@@ -1288,9 +1288,7 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
         goto failure;
     }
 
-    if(!rm_cmd_set_cmdline(cfg, argc, argv)) {
-        rm_log_error_line(_("Cannot join commandline"));
-    }
+    rm_cmd_set_cmdline(cfg, argc, argv);
 
     ////////////////////
     // OPTION PARSING //

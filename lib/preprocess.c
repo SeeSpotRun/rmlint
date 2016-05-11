@@ -100,6 +100,7 @@ static int rm_preprocess_size_group(GSList *group, _UNUSED GSList *prev,
     if(!group->next) {
         RmFile *solo = group->data;
         if(!solo->hardlinks.is_head) {
+            /* group only has one member; kick it */
             solo->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
             rm_util_thread_pool_push(preprocessor->preprocess_file_pipe, solo);
             g_slist_free(group);

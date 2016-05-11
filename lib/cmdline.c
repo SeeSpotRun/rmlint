@@ -35,9 +35,6 @@
 typedef struct RmCmdSession {
     RmCfg *cfg;
 
-    /* count used for determining the verbosity level */
-    int verbosity_count;
-
     /* count used for determining the paranoia level */
     int paranoia_count;
 
@@ -225,13 +222,6 @@ static gboolean rm_cmd_parse_limit_sizes(_UNUSED const char *option_name,
         return true;
     }
 }
-
-static GLogLevelFlags VERBOSITY_TO_LOG_LEVEL[] = {[0] = G_LOG_LEVEL_CRITICAL,
-                                                  [1] = G_LOG_LEVEL_ERROR,
-                                                  [2] = G_LOG_LEVEL_WARNING,
-                                                  [3] = G_LOG_LEVEL_MESSAGE |
-                                                        G_LOG_LEVEL_INFO,
-                                                  [4] = G_LOG_LEVEL_DEBUG};
 
 static bool rm_cmd_add_path(RmCfg *cfg, int index, const char *path) {
     int rc = 0;
@@ -646,13 +636,6 @@ static gboolean rm_cmd_parse_timestamp_file(const char *option_name,
     return success;
 }
 
-static void rm_cmd_set_verbosity_from_cnt(RmCfg *cfg, int verbosity_counter) {
-    cfg->verbosity = VERBOSITY_TO_LOG_LEVEL[CLAMP(
-        verbosity_counter,
-        1,
-        (int)(sizeof(VERBOSITY_TO_LOG_LEVEL) / sizeof(GLogLevelFlags)) - 1)];
-}
-
 static void rm_cmd_set_paranoia_from_cnt(RmCmdSession *cmd, int paranoia_counter,
                                          GError **error) {
     /* Handle the paranoia option */
@@ -778,7 +761,7 @@ static gboolean rm_cmd_parse_progress(_UNUSED const char *option_name,
     cmd->cfg->progress_enabled = true;
 
     /* Set verbosity to minimal */
-    rm_cmd_set_verbosity_from_cnt(cmd->cfg, 1);
+    cmd->cfg->verbosity = G_LOG_LEVEL_ERROR;
     return true;
 }
 
@@ -795,18 +778,47 @@ static void rm_cmd_set_default_outputs(RmCmdSession *cmd) {
     }
 }
 
-
 static gboolean rm_cmd_parse_loud(_UNUSED const char *option_name,
                                   _UNUSED const gchar *count, RmCmdSession *cmd,
                                   _UNUSED GError **error) {
-    rm_cmd_set_verbosity_from_cnt(cmd->cfg, ++cmd->verbosity_count);
+    switch(cmd->cfg->verbosity) {
+    case G_LOG_LEVEL_CRITICAL:
+        cmd->cfg->verbosity = G_LOG_LEVEL_ERROR;
+        break;
+    case G_LOG_LEVEL_ERROR:
+        cmd->cfg->verbosity = G_LOG_LEVEL_WARNING;
+        break;
+    case G_LOG_LEVEL_WARNING:
+        cmd->cfg->verbosity = G_LOG_LEVEL_MESSAGE;
+        break;
+    case G_LOG_LEVEL_MESSAGE:
+        cmd->cfg->verbosity = G_LOG_LEVEL_INFO;
+        break;
+    default:
+        cmd->cfg->verbosity = G_LOG_LEVEL_DEBUG;
+    }
     return true;
 }
 
 static gboolean rm_cmd_parse_quiet(_UNUSED const char *option_name,
                                    _UNUSED const gchar *count, RmCmdSession *cmd,
                                    _UNUSED GError **error) {
-    rm_cmd_set_verbosity_from_cnt(cmd->cfg, --cmd->verbosity_count);
+    switch(cmd->cfg->verbosity) {
+    case G_LOG_LEVEL_DEBUG:
+        cmd->cfg->verbosity = G_LOG_LEVEL_INFO;
+        break;
+    case G_LOG_LEVEL_INFO:
+        cmd->cfg->verbosity = G_LOG_LEVEL_MESSAGE;
+        break;
+    case G_LOG_LEVEL_MESSAGE:
+        cmd->cfg->verbosity = G_LOG_LEVEL_WARNING;
+        break;
+    case G_LOG_LEVEL_WARNING:
+        cmd->cfg->verbosity = G_LOG_LEVEL_ERROR;
+        break;
+    default:
+        cmd->cfg->verbosity = G_LOG_LEVEL_CRITICAL;
+    }
     return true;
 }
 
@@ -1167,7 +1179,6 @@ static bool rm_cmd_set_outputs(RmCmdSession *cmd, GError **error) {
 /* Parse the commandline and set arguments in 'settings' (glob. var accordingly) */
 bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
     RmCmdSession *cmd = g_slice_new0(RmCmdSession);
-    cmd->verbosity_count = 2;
     cmd->paranoia_count = 0;
     cmd->output_cnt[0] = -1;
     cmd->output_cnt[1] = -1;
@@ -1279,9 +1290,6 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
     };
 
     /* clang-format on */
-
-    /* Initialize default verbosity */
-    rm_cmd_set_verbosity_from_cnt(cfg, cmd->verbosity_count);
 
     if(!rm_cmd_set_cwd(cfg)) {
         g_set_error(&error, RM_ERROR_QUARK, 0, _("Cannot set current working directory"));

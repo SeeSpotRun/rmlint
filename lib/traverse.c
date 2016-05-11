@@ -255,7 +255,7 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser
         } else {
             switch(p->fts_info) {
             case FTS_D: /* preorder directory */
-                if(cfg->depth == 0 || p->fts_level >= cfg->depth) {
+                if(p->fts_level >= cfg->depth) {
                     /* continuing into folder would exceed maxdepth*/
                     rm_log_debug_line("Not descending into %s because max depth reached",
                                       p->fts_path);

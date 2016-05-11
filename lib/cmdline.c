@@ -1350,7 +1350,7 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
 
     /* Silent fixes of invalid numberic input */
     cfg->threads = CLAMP(cfg->threads, 1, 128);
-    cfg->depth = CLAMP(cfg->depth, 1, PATH_MAX / 2 + 1);
+    cfg->depth = CLAMP(cfg->depth, 0, PATH_MAX / 2 + 1);
 
     if(cfg->partial_hidden && !cfg->merge_directories) {
         /* --partial-hidden only makes sense with --merge-directories.

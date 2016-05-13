@@ -29,6 +29,17 @@
 #include "traverse.h"
 #include "fts/fts.h"
 
+//////////////////////
+// TRAVERSE SESSION //
+//////////////////////
+
+typedef struct RmTravSession {
+    const RmCfg *cfg;
+    RmUserList *userlist;
+    GThreadPool *file_pool;
+    GHashTable *roots;
+} RmTravSession;
+
 ///////////////////////////////////////////
 // BUFFER FOR STARTING TRAVERSAL THREADS //
 ///////////////////////////////////////////
@@ -63,32 +74,6 @@ static RmTravBuffer *rm_trav_buffer_new(const RmCfg *cfg, char *path, bool is_pr
 
 static void rm_trav_buffer_free(RmTravBuffer *self) {
     g_free(self);
-}
-
-//////////////////////
-// TRAVERSE SESSION //
-//////////////////////
-
-typedef struct RmTravSession {
-    const RmCfg *cfg;
-    RmUserList *userlist;
-    GThreadPool *file_pool;
-    GHashTable *roots;
-} RmTravSession;
-
-static RmTravSession *rm_traverse_session_new(const RmCfg *cfg, GThreadPool *file_pool,
-                                              GHashTable *roots) {
-    RmTravSession *self = g_new0(RmTravSession, 1);
-    self->cfg = cfg;
-    self->file_pool = file_pool;
-    self->userlist = rm_userlist_new();
-    self->roots = roots;
-    return self;
-}
-
-static void rm_traverse_session_free(RmTravSession *traverser) {
-    rm_userlist_destroy(traverser->userlist);
-    g_free(traverser);
 }
 
 //////////////////////
@@ -443,9 +428,13 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
         g_hash_table_insert(roots, cfg->paths[idx], buffer);
     }
 
-    RmTravSession *traverser = rm_traverse_session_new(cfg, file_pool, roots);
+    RmTravSession traverser;
+    traverser.cfg = cfg;
+    traverser.file_pool = file_pool;
+    traverser.userlist = rm_userlist_new();
+    traverser.roots = roots;
 
-    rm_mds_configure(mds, (RmMDSFunc)rm_traverse_directory, traverser, 0,
+    rm_mds_configure(mds, (RmMDSFunc)rm_traverse_directory, &traverser, 0,
                      cfg->threads_per_disk, NULL);
 
     GHashTableIter iter;
@@ -458,9 +447,9 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
             /* Top level paths not treated as hidden unless --partial-hidden */
             bool is_hidden = cfg->partial_hidden && rm_util_path_is_hidden(buffer->path);
 
-            rm_traverse_file(traverser, &buffer->stat_buf, buffer->path, buffer->is_prefd,
-                             buffer->path_index, RM_LINT_TYPE_UNKNOWN, false, is_hidden,
-                             0);
+            rm_traverse_file(&traverser, &buffer->stat_buf, buffer->path,
+                             buffer->is_prefd, buffer->path_index, RM_LINT_TYPE_UNKNOWN,
+                             false, is_hidden, 0);
 
             rm_trav_buffer_free(buffer);
         } else if(S_ISDIR(buffer->stat_buf.st_mode)) {
@@ -482,6 +471,5 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
     rm_mds_finish(mds);
 
     g_hash_table_unref(roots);
-
-    rm_traverse_session_free(traverser);
+    rm_userlist_destroy(traverser.userlist);
 }

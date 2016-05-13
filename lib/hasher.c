@@ -57,14 +57,15 @@ struct _RmHasher {
     RmBufferPool *mem_pool;
     RmHasherCallback callback;
 
+    /* collection of hashpipes */
+    GSList *hashpipes;
+    /* async queue for recycling hashpipes after task finished */
     GAsyncQueue *hashpipe_pool;
-    gint unalloc_hashpipes;
+
+    /* async queue for returning completed digests to the calling routine */
     GAsyncQueue *return_queue;
-    GMutex lock;
-    GCond cond;
 
     gsize buf_size;
-    guint active_tasks;
 };
 
 struct _RmHasherTask {
@@ -104,14 +105,6 @@ static void rm_hasher_hashpipe_worker(RmBuffer *buffer, RmHasher *hasher) {
                          task->task_user_data);
         rm_hasher_task_free(task);
         rm_buffer_release(buffer);
-
-        g_mutex_lock(&hasher->lock);
-        {
-            /* decrease active task count and signal same */
-            hasher->active_tasks--;
-            g_cond_signal(&hasher->cond);
-        }
-        g_mutex_unlock(&hasher->lock);
     }
 }
 
@@ -330,9 +323,9 @@ finish:
 //  RmHasher                        //
 //////////////////////////////////////
 
-static void rm_hasher_hashpipe_free(GThreadPool *hashpipe) {
-    /* free the GThreadPool; wait for any in-progress jobs to finish */
-    g_thread_pool_free(hashpipe, FALSE, TRUE);
+static void rm_hasher_hashpipe_free(GThreadPool *hashpipe, bool wait) {
+    /* free the GThreadPool; maybe wait for any in-progress jobs to finish */
+    g_thread_pool_free(hashpipe, FALSE, wait);
 }
 
 /* local joiner if user provides no joiner to rm_hasher_new() */
@@ -370,18 +363,20 @@ RmHasher *rm_hasher_new(RmDigestType digest_type,
 
     self->session_user_data = session_user_data;
 
-    /* initialise mutex & cond */
-    g_mutex_init(&self->lock);
-    g_cond_init(&self->cond);
-
     /* Create buffer mem pool */
     self->mem_pool = rm_buffer_pool_init(buf_size, cache_quota_bytes);
 
-    /* Create a pool of hashing thread "pools" - each "pool" can only have
-     * one thread because hashing must be done in order */
-    self->hashpipe_pool = g_async_queue_new_full((GDestroyNotify)rm_hasher_hashpipe_free);
-    rm_assert_gentle(num_threads > 0);
-    self->unalloc_hashpipes = num_threads;
+    /* Create a pool of hashing thread "pipes" - a threadpipe is like a
+     * threadpool except that each pipe can only have one thread because
+     * hashing must be done in order */
+    self->hashpipe_pool = g_async_queue_new();
+    for(guint i = 0; i < num_threads; i++) {
+        GThreadPool *hashpipe =
+            rm_util_thread_pool_new((GFunc)rm_hasher_hashpipe_worker, self, 1);
+        self->hashpipes = g_slist_prepend(self->hashpipes, hashpipe);
+        g_async_queue_push(self->hashpipe_pool, hashpipe);
+    }
+
     return self;
 }
 
@@ -390,30 +385,16 @@ void rm_hasher_free(RmHasher *hasher, gboolean wait) {
      * the hashpipe level.  To ensure graceful exit, the hasher is reference counted
      * via hasher->active_tasks.
      */
-    if(wait) {
-        g_mutex_lock(&hasher->lock);
-        {
-            while(hasher->active_tasks > 0) {
-                g_cond_wait(&hasher->cond, &hasher->lock);
-            }
-        }
-        g_mutex_unlock(&hasher->lock);
-    }
-
+    g_slist_foreach(hasher->hashpipes, (GFunc)rm_hasher_hashpipe_free,
+                    GINT_TO_POINTER(wait));
     g_async_queue_unref(hasher->hashpipe_pool);
 
     rm_buffer_pool_destroy(hasher->mem_pool);
-    g_cond_clear(&hasher->cond);
-    g_mutex_clear(&hasher->lock);
     g_slice_free(RmHasher, hasher);
 }
 
 RmHasherTask *rm_hasher_task_new(RmHasher *hasher, RmDigest *digest,
                                  gpointer task_user_data) {
-    g_mutex_lock(&hasher->lock);
-    { hasher->active_tasks++; }
-    g_mutex_unlock(&hasher->lock);
-
     RmHasherTask *self = g_slice_new0(RmHasherTask);
     self->hasher = hasher;
     if(digest) {
@@ -423,20 +404,8 @@ RmHasherTask *rm_hasher_task_new(RmHasher *hasher, RmDigest *digest,
                                      hasher->digest_type == RM_DIGEST_PARANOID);
     }
 
-    /* get a recycled hashpipe if available */
-    self->hashpipe = g_async_queue_try_pop(hasher->hashpipe_pool);
-    if(!self->hashpipe) {
-        if(g_atomic_int_get(&hasher->unalloc_hashpipes) > 0) {
-            /* create a new hashpipe */
-            g_atomic_int_dec_and_test(&hasher->unalloc_hashpipes);
-            self->hashpipe =
-                rm_util_thread_pool_new((GFunc)rm_hasher_hashpipe_worker, hasher, 1);
-
-        } else {
-            /* already at thread limit - wait for a hashpipe to come available */
-            self->hashpipe = g_async_queue_pop(hasher->hashpipe_pool);
-        }
-    }
+    /* get the next available hashpipe (may block if none available) */
+    self->hashpipe = g_async_queue_pop(hasher->hashpipe_pool);
     rm_assert_gentle(self->hashpipe);
 
     self->task_user_data = task_user_data;

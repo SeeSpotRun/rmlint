@@ -387,6 +387,7 @@ void rm_hasher_free(RmHasher *hasher, gboolean wait) {
      */
     g_slist_foreach(hasher->hashpipes, (GFunc)rm_hasher_hashpipe_free,
                     GINT_TO_POINTER(wait));
+    g_slist_free(hasher->hashpipes);
     g_async_queue_unref(hasher->hashpipe_pool);
 
     rm_buffer_pool_destroy(hasher->mem_pool);

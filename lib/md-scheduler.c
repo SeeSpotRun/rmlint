@@ -190,7 +190,6 @@ static gint rm_mds_compare(const RmMDSTask *a, const RmMDSTask *b,
 
 /* merge two already sorted GSLists */
 static GSList *rm_mds_merge(GSList *a, GSList *b, RmMDSSortFunc prioritiser) {
-    guint expected = g_slist_length(a) + g_slist_length(b);
     if(!b) {
         return a;
     }
@@ -219,12 +218,6 @@ static GSList *rm_mds_merge(GSList *a, GSList *b, RmMDSSortFunc prioritiser) {
             a = next;
         }
     }
-    for(GSList *i = result; i; i = i->next) {
-        if(i->next) {
-            rm_assert_gentle(prioritiser(i->data, i->next->data) <= 0);
-        }
-    }
-    rm_assert_gentle(g_slist_length(result) == expected);
     return result;
 }
 

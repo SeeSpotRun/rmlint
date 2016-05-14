@@ -727,12 +727,6 @@ static gboolean rm_cmd_parse_limit_mem(_UNUSED const char *option_name,
     return (rm_cmd_parse_mem(size_spec, error, &cmd->cfg->total_mem));
 }
 
-static gboolean rm_cmd_parse_sweep_size(_UNUSED const char *option_name,
-                                        const gchar *size_spec, RmCmdSession *cmd,
-                                        GError **error) {
-    return (rm_cmd_parse_mem(size_spec, error, &cmd->cfg->sweep_size));
-}
-
 static gboolean rm_cmd_parse_sweep_count(_UNUSED const char *option_name,
                                          const gchar *size_spec, RmCmdSession *cmd,
                                          GError **error) {
@@ -1269,7 +1263,6 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
         {"clamp-low"              , 'q' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(clamp_low)              , "Limit lower reading barrier"                                 , "P"}    ,
         {"clamp-top"              , 'Q' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(clamp_top)              , "Limit upper reading barrier"                                 , "P"}    ,
         {"limit-mem"              , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(limit_mem)              , "Specify max. memory usage target"                            , "S"}    ,
-        {"sweep-size"             , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(sweep_size)             , "Specify max. bytes per pass when scanning disks"             , "S"}    ,
         {"sweep-files"            , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(sweep_count)            , "Specify max. file count per pass when scanning disks"        , "S"}    ,
         {"shred-always-wait"      , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->shred_always_wait      , "Always waits for file increment to finish hashing"           , NULL}   ,
         {"shred-never-wait"       , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->shred_never_wait       , "Never waits for file increment to finish hashing"            , NULL}   ,

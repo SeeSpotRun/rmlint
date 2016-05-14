@@ -103,6 +103,7 @@ typedef struct _RmMDSDevice {
      */
     GMutex lock;
     GCond cond;
+    gint waiting;
 
     /* Reference count for self */
     gint ref_count;
@@ -168,18 +169,6 @@ static void rm_mds_device_free(RmMDSDevice *self) {
 //    RmMDSDevice Implementation   //
 ///////////////////////////////////////
 
-/** @brief Mutex-protected task pusher
- **/
-
-static void rm_mds_push_task_impl(RmMDSDevice *device, RmMDSTask *task) {
-    g_mutex_lock(&device->lock);
-    {
-        device->unsorted_tasks = g_slist_prepend(device->unsorted_tasks, task);
-        g_cond_signal(&device->cond);
-    }
-    g_mutex_unlock(&device->lock);
-}
-
 /** @brief GCompareDataFunc wrapper for mds->prioritiser
  **/
 static gint rm_mds_compare(const RmMDSTask *a, const RmMDSTask *b,
@@ -230,27 +219,19 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
     gint processed = 0;
     g_mutex_lock(&device->lock);
     {
-        /* check for empty queues - if so then wait a little while before giving up */
+        /* check for empty queues - if so then wait a little while */
         if(!device->sorted_tasks && !device->unsorted_tasks && device->ref_count > 0) {
-            /* timed wait for signal from rm_mds_push_task_impl() */
+            /* timed wait for signal from rm_mds_push_task() */
             gint64 end_time = g_get_monotonic_time() + MDS_EMPTYQUEUE_SLEEP_US;
+            device->waiting++;
             g_cond_wait_until(&device->cond, &device->lock, end_time);
+            device->waiting--;
         }
 
         /* sort and merge task lists */
         if(device->unsorted_tasks) {
-            if(mds->prioritiser) {
-                device->unsorted_tasks =
-                    g_slist_sort_with_data(device->unsorted_tasks,
-                                           (GCompareDataFunc)rm_mds_compare,
-                                           (RmMDSSortFunc)mds->prioritiser);
-                device->sorted_tasks =
-                    rm_mds_merge(device->sorted_tasks, device->unsorted_tasks,
-                                 (RmMDSSortFunc)mds->prioritiser);
-            } else {
-                device->sorted_tasks =
-                    g_slist_concat(device->unsorted_tasks, device->sorted_tasks);
-            }
+            device->unsorted_tasks = g_slist_sort_with_data(device->unsorted_tasks, (GCompareDataFunc)rm_mds_compare, (RmMDSSortFunc)mds->prioritiser);
+            device->sorted_tasks = rm_mds_merge(device->sorted_tasks, device->unsorted_tasks, (RmMDSSortFunc)mds->prioritiser);
             device->unsorted_tasks = NULL;
         }
     }
@@ -440,7 +421,18 @@ void rm_mds_push_task(RmMDSDevice *device, dev_t dev, gint64 offset, const char 
     }
 
     RmMDSTask *task = rm_mds_task_new(dev, offset, task_data);
-    rm_mds_push_task_impl(device, task);
+    g_mutex_lock(&device->lock);
+    {
+        if(device->mds->prioritiser) {
+            device->unsorted_tasks = g_slist_prepend(device->unsorted_tasks, task);
+        } else {
+            device->sorted_tasks = g_slist_prepend(device->sorted_tasks, task);
+        }
+        if (device->waiting) {
+            g_cond_signal(&device->cond);
+        }
+    }
+    g_mutex_unlock(&device->lock);
 }
 
 /**

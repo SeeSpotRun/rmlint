@@ -364,7 +364,7 @@ int rm_session_run(RmSession *session) {
 
     /* Create a single-threaded pool to receive files from traverse */
     GThreadPool *traverse_file_pool =
-        rm_util_thread_pool_new((GFunc)rm_session_traverse_pipe, session, 1);
+        rm_util_thread_pool_new((GFunc)rm_session_traverse_pipe, session, 1, TRUE);
 
     rm_traverse_tree(session->cfg, traverse_file_pool, session->mds);
     rm_log_debug_line("Traversal finished at %.3f",
@@ -385,9 +385,9 @@ int rm_session_run(RmSession *session) {
         session->counters->total_filtered_files = session->counters->total_files;
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
 
-        /* Create a single-threaded pools to receive files and groups from traverse */
+        /* Create a single-threaded pools to receive files from preprocess */
         GThreadPool *preprocess_file_pipe =
-            rm_util_thread_pool_new((GFunc)rm_session_pp_files_pipe, session, 1);
+            rm_util_thread_pool_new((GFunc)rm_session_pp_files_pipe, session, 1, TRUE);
 
         rm_preprocess(session->cfg, session->tables, preprocess_file_pipe);
         rm_log_debug_line(
@@ -417,7 +417,7 @@ int rm_session_run(RmSession *session) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER_PREPROCESS);
 
         GThreadPool *shredder_pipe =
-            rm_util_thread_pool_new((GFunc)rm_session_shredder_pipe, session, 1);
+            rm_util_thread_pool_new((GFunc)rm_session_shredder_pipe, session, 1, FALSE);
 
         rm_shred_run(cfg, session->tables, session->mds, shredder_pipe,
                      session->counters->total_filtered_files);
@@ -431,7 +431,7 @@ int rm_session_run(RmSession *session) {
     if(cfg->merge_directories) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
         GThreadPool *merge_pipe =
-            rm_util_thread_pool_new((GFunc)rm_session_merge_pipe, session, 1);
+            rm_util_thread_pool_new((GFunc)rm_session_merge_pipe, session, 1, TRUE);
 
         rm_tm_finish(session->dir_merger, merge_pipe);
         g_thread_pool_free(merge_pipe, FALSE, TRUE);

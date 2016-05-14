@@ -275,7 +275,7 @@ void rm_mds_start(RmMDS *mds) {
     guint threads = CLAMP(mds->threads_per_disk * disk_count, 1, (guint)mds->max_threads);
     rm_log_debug_line("Starting MDS scheduler with %i threads", threads);
 
-    mds->pool = rm_util_thread_pool_new((GFunc)rm_mds_factory, mds, threads);
+    mds->pool = rm_util_thread_pool_new((GFunc)rm_mds_factory, mds, threads, TRUE);
     mds->running = TRUE;
     GList *disks = g_hash_table_get_values(mds->disks);
     g_list_foreach(disks, (GFunc)rm_mds_device_start, mds);

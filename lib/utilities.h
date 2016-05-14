@@ -421,7 +421,8 @@ bool rm_iso8601_format(time_t stamp, char *buf, gsize buf_size);
  *
  * @return newly allocated GThreadPool
  */
-GThreadPool *rm_util_thread_pool_new(GFunc func, gpointer data, int threads);
+GThreadPool *rm_util_thread_pool_new(GFunc func, gpointer data, int threads,
+                                     gboolean exclusive);
 
 /**
  * @brief Push a new job to a threadpool.

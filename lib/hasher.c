@@ -57,7 +57,7 @@ struct _RmHasher {
     RmBufferPool *mem_pool;
     RmHasherCallback callback;
 
-    /* collection of hashpipes */
+    /* collection of hashpipes (single-producer, single-consumer) */
     GSList *hashpipes;
     /* async queue for recycling hashpipes after task finished */
     GAsyncQueue *hashpipe_pool;
@@ -72,10 +72,10 @@ struct _RmHasherTask {
     /* pointer back to hasher main */
     RmHasher *hasher;
 
-    /* single-thread threadpool to send buffers to */
+    /* dedicated threadpool to send buffers to consumer */
     GThreadPool *hashpipe;
 
-    /* checksum to update with read data */
+    /* checksum that consumer will update with the data read by producer */
     RmDigest *digest;
 
     /* user data associated with this specific task */
@@ -372,7 +372,7 @@ RmHasher *rm_hasher_new(RmDigestType digest_type,
     self->hashpipe_pool = g_async_queue_new();
     for(guint i = 0; i < num_threads; i++) {
         GThreadPool *hashpipe =
-            rm_util_thread_pool_new((GFunc)rm_hasher_hashpipe_worker, self, 1);
+            rm_util_thread_pool_new((GFunc)rm_hasher_hashpipe_worker, self, 1, TRUE);
         self->hashpipes = g_slist_prepend(self->hashpipes, hashpipe);
         g_async_queue_push(self->hashpipe_pool, hashpipe);
     }

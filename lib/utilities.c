@@ -1112,9 +1112,10 @@ bool rm_util_thread_pool_push(GThreadPool *pool, gpointer data) {
 }
 
 /* wrapper for g_thread_pool_new with error reporting */
-GThreadPool *rm_util_thread_pool_new(GFunc func, gpointer data, int threads) {
+GThreadPool *rm_util_thread_pool_new(GFunc func, gpointer data, int threads,
+                                     gboolean exclusive) {
     GError *error = NULL;
-    GThreadPool *pool = g_thread_pool_new(func, data, threads, FALSE, &error);
+    GThreadPool *pool = g_thread_pool_new(func, data, threads, exclusive, &error);
 
     if(error != NULL) {
         rm_log_error_line("Unable to create thread pool.");

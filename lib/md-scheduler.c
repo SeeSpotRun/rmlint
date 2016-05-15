@@ -123,7 +123,7 @@ typedef struct _RmMDSDevice {
 /* RmMDSTask */
 static RmMDSTask *rm_mds_task_new(const dev_t dev, const guint64 offset,
                                   const gpointer task_data) {
-    RmMDSTask *self = g_slice_new0(RmMDSTask);
+    RmMDSTask *self = g_slice_new(RmMDSTask);
     self->dev = dev;
     self->offset = offset;
     self->task_data = task_data;
@@ -177,39 +177,6 @@ static gint rm_mds_compare(const RmMDSTask *a, const RmMDSTask *b,
     return result;
 }
 
-/* merge two already sorted GSLists */
-static GSList *rm_mds_merge(GSList *a, GSList *b, RmMDSSortFunc prioritiser) {
-    if(!b) {
-        return a;
-    }
-    if(!a) {
-        return b;
-    }
-    rm_log_warning_line("Sorting mds tasks");
-
-    /* pick a stating point for result */
-    GSList *result = a;
-    if(prioritiser(a->data, b->data) > 0) {
-        a = b;
-        b = result;
-        result = a;
-    }
-
-    while(b) {
-        GSList *next = a->next;
-        if(!next || prioritiser(next->data, b->data) > 0) {
-            /* switch lists */
-            a->next = b;
-            b = next;
-            a = a->next;
-        } else {
-            /* keep going on a */
-            a = next;
-        }
-    }
-    return result;
-}
-
 /** @brief RmMDSDevice worker thread
  **/
 static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
@@ -231,7 +198,7 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
         /* sort and merge task lists */
         if(device->unsorted_tasks) {
             device->unsorted_tasks = g_slist_sort_with_data(device->unsorted_tasks, (GCompareDataFunc)rm_mds_compare, (RmMDSSortFunc)mds->prioritiser);
-            device->sorted_tasks = rm_mds_merge(device->sorted_tasks, device->unsorted_tasks, (RmMDSSortFunc)mds->prioritiser);
+            device->sorted_tasks = rm_util_slist_merge_sorted(device->sorted_tasks, device->unsorted_tasks, (GCompareDataFunc)mds->prioritiser, NULL);
             device->unsorted_tasks = NULL;
         }
     }

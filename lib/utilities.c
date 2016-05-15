@@ -215,6 +215,39 @@ gpointer rm_util_slist_pop(GSList **list, GMutex *lock) {
     return result;
 }
 
+/* merge two already sorted GSLists */
+GSList *rm_util_slist_merge_sorted(GSList *a, GSList *b, GCompareDataFunc compare_func,
+                                   gpointer user_data) {
+    if(!b) {
+        return a;
+    }
+    if(!a) {
+        return b;
+    }
+
+    /* pick a stating point for result */
+    GSList *result = a;
+    if(compare_func(a->data, b->data, user_data) > 0) {
+        a = b;
+        b = result;
+        result = a;
+    }
+
+    while(b) {
+        GSList *next = a->next;
+        if(!next || compare_func(next->data, b->data, user_data) > 0) {
+            /* switch lists */
+            a->next = b;
+            b = next;
+            a = a->next;
+        } else {
+            /* keep going on a */
+            a = next;
+        }
+    }
+    return result;
+}
+
 /* checks uid and gid; returns 0 if both ok, else RM_LINT_TYPE_ corresponding *
  * to RmFile->filter types                                            */
 int rm_util_uid_gid_check(RmStat *statp, RmUserList *userlist) {

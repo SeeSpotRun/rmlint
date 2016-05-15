@@ -111,15 +111,8 @@ typedef gint (*RmMDSFunc)(RmMDSTask *task, gpointer session_user_data);
 
 /**
  * @brief RmMDSTask task prioritisation function prototype
- *
- * @param dev_a  Device number for task a
- * @param dev_b  Device number for task b
- * @param off_a  Device offset bytes for task a
- * @param dev_a  Device offset bytes for task b
- * @param data_a User data for task a
- * @param data_b User data for task b
  * @retval negative value or zero if a should be processed before b, positive value if b
- *should be processed before a
+ * should be processed before a
  **/
 typedef gint (*RmMDSSortFunc)(const RmMDSTask *task_a, const RmMDSTask *task_b);
 

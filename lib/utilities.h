@@ -285,6 +285,12 @@ gint rm_util_slist_foreach_remove(GSList **list, RmSListRFunc func, gpointer use
 gpointer rm_util_slist_pop(GSList **list, GMutex *lock);
 
 /**
+* @brief Merge two already sorted GSLists
+*/
+GSList *rm_util_slist_merge_sorted(GSList *a, GSList *b, GCompareDataFunc compare_func,
+                                   gpointer user_data);
+
+/**
  * @brief Return a pointer to the extension part of the file or NULL if none.
  *
  * @return: a pointer >= basename or NULL.

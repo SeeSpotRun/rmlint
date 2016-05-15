@@ -114,9 +114,9 @@ typedef guint64 RmOff;
     rm_log_warning(": "RESET);    \
 
 #define rm_log_info_prefix()   \
-    rm_log_warning(GREEN);     \
-    rm_log_warning(_("INFO")); \
-    rm_log_warning(": "RESET); \
+    rm_log_info(GREEN);     \
+    rm_log_info(_("INFO")); \
+    rm_log_info(": "RESET); \
 
 #define rm_log_debug_prefix() \
     rm_log_debug(BLUE);       \
@@ -137,8 +137,8 @@ typedef guint64 RmOff;
 
 #define rm_log_info_line(...)    \
     rm_log_info_prefix()         \
-    rm_log_warning(__VA_ARGS__); \
-    rm_log_warning("\n");        \
+    rm_log_info(__VA_ARGS__); \
+    rm_log_info("\n");        \
 
 #define rm_log_debug_line(...) \
     rm_log_debug_prefix()      \
@@ -154,7 +154,7 @@ typedef guint64 RmOff;
         rm_log_error_line("     Will try to continue in 2 seconds. Expect crashes.");         \
         g_usleep(2 * 1000 * 1000);                                                            \
     }}
-    
+
 
 #define RM_NOT_REACHED (0)
 #define rm_assert_gentle_not_reached() rm_assert_gentle(RM_NOT_REACHED)

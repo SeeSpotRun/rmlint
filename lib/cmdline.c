@@ -777,15 +777,9 @@ static gboolean rm_cmd_parse_loud(_UNUSED const char *option_name,
                                   _UNUSED GError **error) {
     switch(cmd->cfg->verbosity) {
     case G_LOG_LEVEL_CRITICAL:
-        cmd->cfg->verbosity = G_LOG_LEVEL_ERROR;
-        break;
-    case G_LOG_LEVEL_ERROR:
         cmd->cfg->verbosity = G_LOG_LEVEL_WARNING;
         break;
     case G_LOG_LEVEL_WARNING:
-        cmd->cfg->verbosity = G_LOG_LEVEL_MESSAGE;
-        break;
-    case G_LOG_LEVEL_MESSAGE:
         cmd->cfg->verbosity = G_LOG_LEVEL_INFO;
         break;
     default:
@@ -802,13 +796,7 @@ static gboolean rm_cmd_parse_quiet(_UNUSED const char *option_name,
         cmd->cfg->verbosity = G_LOG_LEVEL_INFO;
         break;
     case G_LOG_LEVEL_INFO:
-        cmd->cfg->verbosity = G_LOG_LEVEL_MESSAGE;
-        break;
-    case G_LOG_LEVEL_MESSAGE:
         cmd->cfg->verbosity = G_LOG_LEVEL_WARNING;
-        break;
-    case G_LOG_LEVEL_WARNING:
-        cmd->cfg->verbosity = G_LOG_LEVEL_ERROR;
         break;
     default:
         cmd->cfg->verbosity = G_LOG_LEVEL_CRITICAL;

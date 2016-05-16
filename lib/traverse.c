@@ -201,7 +201,7 @@ static void rm_traverse_convert_small_stat_buf(struct stat *fts_statp, RmStat *b
 
 #endif
 
-static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser) {
+static gint rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser) {
     const RmCfg *cfg = traverser->cfg;
 
     char is_prefd = buffer->is_prefd;
@@ -403,8 +403,9 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser
     fts_close(ftsp);
 
 done:
-    rm_mds_device_ref(buffer->disk, -1);
+    rm_mds_device_ref(buffer->disk, -1, FALSE);
     rm_trav_buffer_free(buffer);
+    return 1;
 }
 
 ////////////////
@@ -436,6 +437,7 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
 
     rm_mds_configure(mds, (RmMDSFunc)rm_traverse_directory, &traverser, 0,
                      cfg->threads_per_disk, NULL);
+    rm_mds_start(mds);
 
     GHashTableIter iter;
     char *path;
@@ -458,7 +460,7 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
                 rm_mds_device_get(mds, buffer->path, (cfg->fake_pathindex_as_disk)
                                                          ? buffer->path_index + 1
                                                          : buffer->stat_buf.st_dev);
-            rm_mds_device_ref(buffer->disk, 1);
+            rm_mds_device_ref(buffer->disk, 1, FALSE);
             rm_mds_push_task(buffer->disk, buffer->stat_buf.st_dev, 0, buffer->path,
                              buffer);
 
@@ -467,7 +469,6 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
             rm_trav_buffer_free(buffer);
         }
     }
-    rm_mds_start(mds);
     rm_mds_finish(mds);
 
     g_hash_table_unref(roots);

@@ -683,7 +683,7 @@ static void rm_shred_send(GThreadPool *pipe, GQueue *files, gint delta_files,
             RmFile *file = iter->data;
             if(!RM_IS_BUNDLED_HARDLINK(file)) {
                 rm_assert_gentle(file->disk);
-                rm_mds_device_ref(file->disk, -1);
+                rm_mds_device_ref(file->disk, -1, FALSE);
                 file->disk = NULL;
                 delta_files--;
                 delta_bytes -= file->file_size - file->hash_offset;
@@ -1101,7 +1101,7 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredGroup *group) {
     file->disk = rm_mds_device_get(shredder->mds, file_path, (cfg->fake_pathindex_as_disk)
                                                                  ? file->path_index + 1
                                                                  : file->dev);
-    rm_mds_device_ref(file->disk, 1);
+    rm_mds_device_ref(file->disk, 1, FALSE);
     rm_shred_send(shredder->shredder_pipe, NULL, 1,
                   (gint64)file->file_size - file->hash_offset);
 
@@ -1131,6 +1131,7 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     rm_assert_gentle(files->data);
 
     RmShredGroup *group = rm_shred_group_new(files->data, shredder);
+    group->parent = GINT_TO_POINTER(1); /* dummy parent to prevent premature free */
     group->digest_type = shredder->cfg->checksum_type;
     group->shredder = shredder;
 
@@ -1143,10 +1144,8 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     }
 
     rm_assert_gentle(group);
-    /* remove group if it failed to launch (eg if only 1 file) */
-    if(group->status == RM_SHRED_GROUP_DORMANT) {
-        rm_shred_group_finalise(group);
-    }
+    /* give the group its independence */
+    rm_shred_group_make_orphan(group);
 }
 
 static void rm_shred_preprocess_input(RmShredTag *shredder, RmFileTables *tables) {
@@ -1336,9 +1335,7 @@ static gint rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     if(rm_session_was_aborted() || file->shred_group->has_only_ext_cksums) {
         if(rm_session_was_aborted()) {
             file->status = RM_FILE_STATE_IGNORE;
-        }
-
-        if(file->shred_group->has_only_ext_cksums) {
+        } else if(file->shred_group->has_only_ext_cksums) {
             rm_shred_reassign_checksum(shredder, file);
         }
         file->shredder_waiting = FALSE;
@@ -1406,7 +1403,7 @@ static gint rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     }
     if(file) {
         /* file was not handled by rm_shred_sift so we need to add it back to the queue */
-        rm_mds_push_task(file->disk, file->dev, file->disk_offset, NULL, file);
+        rm_shred_push_queue(file);
     }
     return result;
 }
@@ -1428,15 +1425,6 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
     g_mutex_init(&shredder.hash_mem_mtx);
 
     g_mutex_init(&shredder.lock);
-
-    rm_mds_configure(shredder.mds,
-                     (RmMDSFunc)rm_shred_process_file,
-                     &shredder,
-                     cfg->sweep_count,
-                     cfg->threads_per_disk,
-                     (RmMDSSortFunc)rm_mds_elevator_cmp);
-
-    rm_shred_preprocess_input(&shredder, tables);
 
     /* estimate mem used for RmFiles and allocate any leftovers to read buffer and/or
      * paranoid mem */
@@ -1476,7 +1464,23 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                                     (RmHasherCallback)rm_shred_hash_callback,
                                     &shredder);
 
+    rm_mds_configure(shredder.mds,
+                     (RmMDSFunc)rm_shred_process_file,
+                     &shredder,
+                     cfg->sweep_count,
+                     cfg->threads_per_disk,
+                     (RmMDSSortFunc)rm_mds_elevator_cmp);
     rm_mds_start(shredder.mds);
+
+    /* optional (reduces speed but makes counting nicer):
+     * rm_mds_pause(shredder.mds);
+     */
+
+    rm_shred_preprocess_input(&shredder, tables);
+
+    /* optional (see above):
+     * rm_mds_resume(shredder.mds);
+     */
 
     /* should complete shred session and then free: */
     rm_mds_free(shredder.mds, FALSE);

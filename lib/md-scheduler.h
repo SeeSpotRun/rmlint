@@ -28,8 +28,8 @@
 
 #include <glib.h>
 #include "config.h"
-#include "utilities.h"
 #include "session.h"
+#include "utilities.h"
 
 /**
  * @file md-scheduler.h
@@ -119,15 +119,15 @@ typedef gint (*RmMDSSortFunc)(const RmMDSTask *task_a, const RmMDSTask *task_b);
 /**
  * @brief Allocate and initialise a new MDS scheduler
  *
- * @param max_threads  Maximum number of concurrent device threads
+ * @param threads_per_ssd  Number of threads for non-rotational disks
+ * @note if threads_per_ssd > 1 then no sorting will be done for ssd tasks
  * @param mount_table RmMountTable to use; if NULL then will create new one
  * @param fake_disk Don't use mount table; use user-supplied dev as disk number
  *
- * Scheduler is initially paused.
  * session_user_data will be passed to task callback.
  *
  **/
-RmMDS *rm_mds_new(const gint max_threads, RmMountTable *mount_table, bool fake_disk);
+RmMDS *rm_mds_new(const gint threads_per_ssd, RmMountTable *mount_table, bool fake_disk);
 
 /**
  * @brief Configure or reconfigure an MDS scheduler
@@ -142,7 +142,7 @@ void rm_mds_configure(RmMDS *self,
                       const RmMDSFunc func,
                       const gpointer user_data,
                       const gint pass_quota,
-                      const gint threads_per_disk,
+                      const gint threads_per_ssd,
                       RmMDSSortFunc prioritiser);
 
 /**
@@ -186,7 +186,9 @@ gboolean rm_mds_device_is_rotational(RmMDSDevice *device);
  * @param ref_count The amount to increase/decrease reference count
  * @retval the resultant reference count for the device
  **/
-gint rm_mds_device_ref(RmMDSDevice *device, const gint ref_count);
+gint rm_mds_device_ref(RmMDSDevice *device,
+                       const gint ref_count,
+                       const gboolean have_mds_lock);
 
 /**
  * @brief Push a new task to an RmMDS scheduler, based on file/folder path.
@@ -204,6 +206,9 @@ void rm_mds_push_task(RmMDSDevice *device,
                       gint64 offset,
                       const char *path,
                       const gpointer task_data);
+
+void rm_mds_pause(RmMDS *mds);
+void rm_mds_resume(RmMDS *mds);
 
 /**
  * @brief prioritiser function for basic elevator algorithm

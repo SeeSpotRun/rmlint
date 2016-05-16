@@ -50,6 +50,7 @@ struct _RmMDS {
 
     /* Sorting function for device task queues */
     RmMDSSortFunc prioritiser;
+    gint threads_per_ssd;
 
     /* Mounts table for grouping dev's by physical devices
      * and identifying rotationality */
@@ -67,15 +68,15 @@ struct _RmMDS {
     GMutex lock;
     GCond cond;
 
+    gint ref_count;
+
     /* flag for whether threadpool is running */
     gboolean running;
 
+    gboolean paused;
+
     /* quota to limit number of tasks per pass of each device */
     gint pass_quota;
-
-    /* maximum number of threads and threads per disk */
-    gint max_threads;
-    gint threads_per_disk;
 
     /* pointer to user data to be passed to func */
     gpointer user_data;
@@ -90,26 +91,20 @@ typedef struct _RmMDSDevice {
     /* Device's physical disk ID (only used for debug info) */
     dev_t disk;
 
-    /* Sorted list of tasks queued for execution */
-    GSList *sorted_tasks;
+    /* threadpool for channelling tasks */
+    GThreadPool *pool;
 
-    /* Stack for tasks that will be sorted and carried out next pass */
-    GSList *unsorted_tasks;
-
-    /* Lock for access to:
-     *  self->sorted_tasks
-     *  self->unsorted_tasks
-     *  self->ref_count
-     */
-    GMutex lock;
-    GCond cond;
-    gint waiting;
-
-    /* Reference count for self */
-    gint ref_count;
-
-    /* Number of running threads for self */
+    /* maximum number of threads for this device */
     gint threads;
+
+    /* used to keep track of dev & offset of last completed task */
+    RmMDSTask prev;
+
+    /* number of completed tasks since last sort */
+    gint tasks_this_pass;
+
+    /* Atomic reference count for self */
+    gint ref_count;
 
     /* is disk rotational? */
     gboolean is_rotational;
@@ -135,15 +130,14 @@ static void rm_mds_task_free(RmMDSTask *task) {
 }
 
 /* RmMDSDevice */
+
+/** @brief Allocate and configure a new RmMDSDevice
+ **/
 static RmMDSDevice *rm_mds_device_new(RmMDS *mds, const dev_t disk) {
     RmMDSDevice *self = g_slice_new0(RmMDSDevice);
 
-    g_mutex_init(&self->lock);
-    g_cond_init(&self->cond);
-
     self->mds = mds;
     self->ref_count = 0;
-    self->threads = 0;
     self->disk = disk;
 
     if(mds->fake_disk) {
@@ -152,17 +146,21 @@ static RmMDSDevice *rm_mds_device_new(RmMDS *mds, const dev_t disk) {
         self->is_rotational = !rm_mounts_is_nonrotational(mds->mount_table, disk);
     }
 
+    self->threads = (self->is_rotational) ? 1 : mds->threads_per_ssd;
+
     rm_log_debug_line("Created new RmMDSDevice for %srotational disk #%" LLU,
                       self->is_rotational ? "" : "non-", (RmOff)disk);
     return self;
 }
 
-/** @brief  Free mem allocated to an RmMDSDevice
+/** @brief  Free mem allocated to an RmMDSDevice; prototyped for GRHFunc compatibility
  **/
-static void rm_mds_device_free(RmMDSDevice *self) {
-    g_mutex_clear(&self->lock);
-    g_cond_clear(&self->cond);
+static gboolean rm_mds_device_free(_UNUSED guint disk, RmMDSDevice *self,
+                                   _UNUSED gpointer user_data) {
+    rm_log_debug_line("rm_mds_device_free for disk %d", disk);
+    g_thread_pool_free(self->pool, FALSE, TRUE);
     g_slice_free(RmMDSDevice, self);
+    return TRUE;
 }
 
 ///////////////////////////////////////
@@ -179,90 +177,56 @@ static gint rm_mds_compare(const RmMDSTask *a, const RmMDSTask *b,
 
 /** @brief RmMDSDevice worker thread
  **/
-static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
-    /* rm_mds_factory processes tasks from device->task_list.
-     * After completing one pass of the device, returns self to the
-     * mds->pool threadpool. */
-    gint processed = 0;
-    g_mutex_lock(&device->lock);
-    {
-        /* check for empty queues - if so then wait a little while */
-        if(!device->sorted_tasks && !device->unsorted_tasks && device->ref_count > 0) {
-            /* timed wait for signal from rm_mds_push_task() */
-            gint64 end_time = g_get_monotonic_time() + MDS_EMPTYQUEUE_SLEEP_US;
-            device->waiting++;
-            g_cond_wait_until(&device->cond, &device->lock, end_time);
-            device->waiting--;
-        }
-
-        /* sort and merge task lists */
-        if(device->unsorted_tasks) {
-            device->unsorted_tasks = g_slist_sort_with_data(device->unsorted_tasks, (GCompareDataFunc)rm_mds_compare, (RmMDSSortFunc)mds->prioritiser);
-            device->sorted_tasks = rm_util_slist_merge_sorted(device->sorted_tasks, device->unsorted_tasks, (GCompareDataFunc)mds->prioritiser, NULL);
-            device->unsorted_tasks = NULL;
-        }
+static void rm_mds_factory(RmMDSTask *task, RmMDSDevice *device) {
+    RmMDS *mds = device->mds;
+    if(mds->paused) {
+        rm_util_thread_pool_push(device->pool, task);
+        g_usleep(1000);
+        return;
     }
-    g_mutex_unlock(&device->lock);
+    if(mds->prioritiser && device->threads == 1) {
+        /* device queue is sorted... note we are single-threaded so can
+         * access all device struct fields with thread safety */
+        if(device->tasks_this_pass > mds->pass_quota ||
+           mds->prioritiser(task, &device->prev) < 0) {
+            /* got an out-of-order task; reject it... */
+            rm_util_thread_pool_push(device->pool, task);
+            rm_log_debug_line("rm_mds_factory: re-sorting");
 
-    /* process tasks from device->sorted_tasks */
-    RmMDSTask *task = NULL;
-    while(processed < mds->pass_quota &&
-          (task = rm_util_slist_pop(&device->sorted_tasks, &device->lock))) {
-        if(mds->func(task->task_data, mds->user_data)) {
-            /* task succeeded; update counters */
-            ++processed;
-        }
-        rm_mds_task_free(task);
-    }
+            /* ...and sort the list once (by setting sort function and then clearing
+             * it; sorting incoming tasks slows us down too much) */
+            g_thread_pool_set_sort_function(
+                device->pool, (GCompareDataFunc)rm_mds_compare, mds->prioritiser);
+            g_thread_pool_set_sort_function(device->pool, NULL, NULL);
 
-    if(rm_mds_device_ref(device, 0) > 0) {
-        /* return self to pool for further processing */
-        if(processed == 0) {
-            /* stalled queue; chill for a bit */
-            g_usleep(1000);
+            /* reset head position */
+            device->prev.dev = 0;
+            device->prev.offset = 0;
+            device->tasks_this_pass = 0;
+            return;
         }
-        rm_util_thread_pool_push(mds->pool, device);
-    } else if(g_atomic_int_dec_and_test(&device->threads)) {
-        /* free self and signal to rm_mds_free() */
-        g_mutex_lock(&mds->lock);
-        {
-            rm_log_debug_line("Freeing device %" LLU " (pointer %p)", (RmOff)device->disk,
-                              device);
-            g_hash_table_remove(mds->disks, GINT_TO_POINTER(device->disk));
-            rm_mds_device_free(device);
-            g_cond_signal(&mds->cond);
-        }
-        g_mutex_unlock(&mds->lock);
+        /* remember head position */
+        device->prev.dev = task->dev;
+        device->prev.offset = task->offset;
+        /* do the actual work */
+        device->tasks_this_pass +=
+            device->mds->func(task->task_data, device->mds->user_data);
+    } else {
+        /* device queue is not sorted; just do the work */
+        device->mds->func(task->task_data, device->mds->user_data);
     }
+    rm_mds_task_free(task);
 }
 
-/** @brief Push an RmMDSDevice to the threadpool
+/** @brief Start an RmMDSDevice (prototyped as GHFunc)
  **/
-void rm_mds_device_start(RmMDSDevice *device, RmMDS *mds) {
-    rm_assert_gentle(device->threads == 0);
-
-    device->threads = mds->threads_per_disk;
-    g_mutex_lock(&device->lock);
-    {
-        for(int i = 0; i < mds->threads_per_disk; ++i) {
-            rm_log_debug_line("Starting disk %" LLU " (pointer %p) thread #%i",
-                              (RmOff)device->disk, device, i + 1);
-            rm_util_thread_pool_push(mds->pool, device);
-        }
-    }
-    g_mutex_unlock(&device->lock);
-}
-
-void rm_mds_start(RmMDS *mds) {
-    guint disk_count = g_hash_table_size(mds->disks);
-    guint threads = CLAMP(mds->threads_per_disk * disk_count, 1, (guint)mds->max_threads);
-    rm_log_debug_line("Starting MDS scheduler with %i threads", threads);
-
-    mds->pool = rm_util_thread_pool_new((GFunc)rm_mds_factory, mds, threads, TRUE);
-    mds->running = TRUE;
-    GList *disks = g_hash_table_get_values(mds->disks);
-    g_list_foreach(disks, (GFunc)rm_mds_device_start, mds);
-    g_list_free(disks);
+static void rm_mds_device_start(_UNUSED guint disk, RmMDSDevice *device,
+                                _UNUSED RmMDS *mds) {
+    rm_mds_device_ref(device, 1, TRUE);
+    rm_log_info_line("rm_mds_device_start for %lu with %d threads", device->disk,
+                     device->threads);
+    device->pool =
+        rm_util_thread_pool_new((GFunc)rm_mds_factory, device, device->threads, FALSE);
 }
 
 static RmMDSDevice *rm_mds_device_get_by_disk(RmMDS *mds, const dev_t disk) {
@@ -270,13 +234,14 @@ static RmMDSDevice *rm_mds_device_get_by_disk(RmMDS *mds, const dev_t disk) {
     g_mutex_lock(&mds->lock);
     {
         rm_assert_gentle(mds->disks);
+        rm_assert_gentle(mds->running);
 
         result = g_hash_table_lookup(mds->disks, GINT_TO_POINTER(disk));
         if(!result) {
             result = rm_mds_device_new(mds, disk);
             g_hash_table_insert(mds->disks, GINT_TO_POINTER(disk), result);
-            if(g_atomic_int_get(&mds->running) == TRUE) {
-                rm_mds_device_start(result, mds);
+            if(mds->running) {
+                rm_mds_device_start(disk, result, mds);
             }
         }
     }
@@ -284,17 +249,48 @@ static RmMDSDevice *rm_mds_device_get_by_disk(RmMDS *mds, const dev_t disk) {
     return result;
 }
 
+/** @brief update reference count for mds session; if result is zero then signal cond
+ **/
+static gint rm_mds_ref(RmMDS *mds, const gint ref_count, gboolean have_mds_lock) {
+    gint result;
+    if(!have_mds_lock) {
+        g_mutex_lock(&mds->lock);
+    }
+    {
+        rm_assert_gentle(mds->ref_count >= 0);
+        mds->ref_count += ref_count;
+        rm_assert_gentle(mds->ref_count >= 0);
+        result = mds->ref_count;
+
+        if(result == 0) {
+            /* signal to rm_mds_finish */
+            g_cond_signal(&mds->cond);
+        }
+    }
+    if(!have_mds_lock) {
+        g_mutex_unlock(&mds->lock);
+    }
+
+    return result;
+}
+
+/* GHFunc wrapper for rm_mds_device_ref */
+static gint rm_mds_device_ref_ghfunc(_UNUSED dev_t disk, RmMDSDevice *device,
+                                     gint ref_count) {
+    return rm_mds_device_ref(device, ref_count, TRUE);
+}
+
 //////////////////////////
 //  API Implementation  //
 //////////////////////////
 
-RmMDS *rm_mds_new(const gint max_threads, RmMountTable *mount_table, bool fake_disk) {
+RmMDS *rm_mds_new(gint threads_per_ssd, RmMountTable *mount_table, bool fake_disk) {
     RmMDS *self = g_slice_new0(RmMDS);
 
     g_mutex_init(&self->lock);
     g_cond_init(&self->cond);
 
-    self->max_threads = max_threads;
+    self->threads_per_ssd = threads_per_ssd;
 
     if(!mount_table && !fake_disk) {
         self->mount_table = rm_mounts_table_new(FALSE);
@@ -313,31 +309,50 @@ void rm_mds_configure(RmMDS *self,
                       const RmMDSFunc func,
                       const gpointer user_data,
                       const gint pass_quota,
-                      const gint threads_per_disk,
+                      const gint threads_per_ssd,
                       RmMDSSortFunc prioritiser) {
     rm_assert_gentle(self->running == FALSE);
     self->func = func;
     self->user_data = user_data;
-    self->threads_per_disk = threads_per_disk;
+    self->threads_per_ssd = threads_per_ssd;
     self->pass_quota = (pass_quota > 0) ? pass_quota : G_MAXINT;
     self->prioritiser = prioritiser;
 }
 
-void rm_mds_finish(RmMDS *mds) {
+void rm_mds_start(RmMDS *mds) {
     g_mutex_lock(&mds->lock);
-    /* wait for any pending threads to finish */
     {
-        while(g_hash_table_size(mds->disks) > 0) {
-            /* wait for a device to finish */
-            { g_cond_wait(&mds->cond, &mds->lock); }
-        }
+        rm_mds_ref(mds, 1, TRUE);
+        mds->running = TRUE;
+        g_hash_table_foreach(mds->disks, (GHFunc)rm_mds_device_start, mds);
     }
     g_mutex_unlock(&mds->lock);
+}
 
-    mds->running = FALSE;
-    if(mds->pool) {
-        g_thread_pool_free(mds->pool, false, true);
+void rm_mds_pause(RmMDS *mds) {
+    mds->paused = TRUE;
+}
+
+void rm_mds_resume(RmMDS *mds) {
+    mds->paused = FALSE;
+}
+
+void rm_mds_finish(RmMDS *mds) {
+    g_mutex_lock(&mds->lock);
+    {
+        g_hash_table_foreach(mds->disks, (GHFunc)rm_mds_device_ref_ghfunc,
+                             GINT_TO_POINTER(-1));
+        rm_mds_ref(mds, -1, TRUE);
+
+        while(g_atomic_int_get(&mds->ref_count) > 0) {
+            g_cond_wait(&mds->cond, &mds->lock);
+        }
+        g_hash_table_foreach_remove(mds->disks, (GHRFunc)rm_mds_device_free, NULL);
     }
+    mds->running = FALSE;
+    g_mutex_unlock(&mds->lock);
+
+    rm_log_debug_line("rm_mds_finish: done");
 }
 
 void rm_mds_free(RmMDS *mds, gboolean free_mount_table) {
@@ -353,15 +368,20 @@ void rm_mds_free(RmMDS *mds, gboolean free_mount_table) {
     g_slice_free(RmMDS, mds);
 }
 
-gint rm_mds_device_ref(RmMDSDevice *device, const gint ref_count) {
-    gint result = 0;
-    g_mutex_lock(&device->lock);
-    {
-        device->ref_count += ref_count;
-        result = device->ref_count;
+gint rm_mds_device_ref(RmMDSDevice *device, const gint ref_count,
+                       const gboolean have_mds_lock) {
+    gint was = g_atomic_int_add(&device->ref_count, ref_count);
+    gint is = was + ref_count;
+    rm_assert_gentle(was >= 0);
+    rm_assert_gentle(is >= 0);
+
+    if(was == 0 && is > 0) {
+        rm_mds_ref(device->mds, 1, have_mds_lock);
+    } else if(was > 0 && is == 0) {
+        rm_mds_ref(device->mds, -1, have_mds_lock);
     }
-    g_mutex_unlock(&device->lock);
-    return result;
+
+    return is;
 }
 
 RmMDSDevice *rm_mds_device_get(RmMDS *mds, const char *path, dev_t dev) {
@@ -386,20 +406,7 @@ void rm_mds_push_task(RmMDSDevice *device, dev_t dev, gint64 offset, const char 
     if(device->is_rotational && offset == -1) {
         offset = rm_offset_get_from_path(path, 0, NULL);
     }
-
-    RmMDSTask *task = rm_mds_task_new(dev, offset, task_data);
-    g_mutex_lock(&device->lock);
-    {
-        if(device->mds->prioritiser) {
-            device->unsorted_tasks = g_slist_prepend(device->unsorted_tasks, task);
-        } else {
-            device->sorted_tasks = g_slist_prepend(device->sorted_tasks, task);
-        }
-        if (device->waiting) {
-            g_cond_signal(&device->cond);
-        }
-    }
-    g_mutex_unlock(&device->lock);
+    rm_util_thread_pool_push(device->pool, rm_mds_task_new(dev, offset, task_data));
 }
 
 /**

@@ -26,9 +26,9 @@
 #ifndef RM_FILE_H
 #define RM_FILE_H
 
-#include <sys/stat.h>
-#include <stdbool.h>
 #include <glib.h>
+#include <stdbool.h>
+#include <sys/stat.h>
 
 #include "cfg.h"
 #include "pathtricia.h"

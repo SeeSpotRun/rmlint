@@ -23,22 +23,22 @@
  *
  */
 
+#include <glib.h>
 #include <stdio.h>
 #include <string.h>
-#include <glib.h>
 
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <fcntl.h>
 
 #include "checksum.h"
 
+#include "checksums/cfarmhash.h"
 #include "checksums/city.h"
 #include "checksums/citycrc.h"
 #include "checksums/murmur3.h"
 #include "checksums/spooky-c.h"
-#include "checksums/cfarmhash.h"
 #include "checksums/xxhash/xxhash.h"
 
 #include "utilities.h"

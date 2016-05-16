@@ -23,10 +23,10 @@
 *
 **/
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include <locale.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "../lib/config.h"
 #include "../lib/hasher.h"

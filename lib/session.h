@@ -26,10 +26,10 @@
 #ifndef RM_SESSION_H
 #define RM_SESSION_H
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdbool.h>
 #include <glib.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "cfg.h"
 #include "file.h"

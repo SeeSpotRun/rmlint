@@ -23,9 +23,9 @@
 *
 **/
 
+#include <locale.h>
 #include <stdlib.h>
 #include <string.h>
-#include <locale.h>
 
 #include "../lib/api.h"
 #include "../lib/config.h"
@@ -36,8 +36,8 @@
 #endif
 
 #if HAVE_BTRFS_H
-#include <sys/ioctl.h>
 #include <linux/btrfs.h>
+#include <sys/ioctl.h>
 #endif
 
 static char *remove_color_escapes(char *message) {

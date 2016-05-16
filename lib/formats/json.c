@@ -23,10 +23,10 @@
  *
  */
 
-#include "../formats.h"
-#include "../utilities.h"
-#include "../preprocess.h"
 #include "../checksums/spooky-c.h"
+#include "../formats.h"
+#include "../preprocess.h"
+#include "../utilities.h"
 
 #include <glib.h>
 #include <stdio.h>

@@ -29,11 +29,11 @@
 #include <glib.h>
 #include <stdbool.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <sys/uio.h>
 
 /* Pat(h)tricia Trie implementation */
 #include "pathtricia.h"

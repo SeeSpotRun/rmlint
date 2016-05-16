@@ -26,9 +26,9 @@
 #include "../formats.h"
 
 #include <glib.h>
+#include <search.h>
 #include <stdio.h>
 #include <string.h>
-#include <search.h>
 
 #include <sys/ioctl.h>
 

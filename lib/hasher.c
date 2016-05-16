@@ -23,9 +23,9 @@
  *
  */
 
+#include <glib.h>
 #include <stdio.h>
 #include <string.h>
-#include <glib.h>
 
 #include <fcntl.h>
 

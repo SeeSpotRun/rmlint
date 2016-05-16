@@ -24,22 +24,22 @@
  */
 
 #include <glib.h>
-#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <sys/uio.h>
 
 #include "checksum.h"
 #include "hasher.h"
 
+#include "formats.h"
 #include "preprocess.h"
 #include "utilities.h"
-#include "formats.h"
 
+#include "md-scheduler.h"
 #include "shredder.h"
 #include "xattr.h"
-#include "md-scheduler.h"
 
 /* Needed for RmTreeMerger */
 #include "treemerge.h"

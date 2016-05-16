@@ -23,19 +23,19 @@
  *
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <ctype.h>
-#include <unistd.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
-#include <pwd.h>
 #include <grp.h>
+#include <pwd.h>
 
 #include <libgen.h>
 
@@ -49,21 +49,21 @@
 #endif
 
 #if HAVE_FIEMAP
-#include <linux/fs.h>
 #include <linux/fiemap.h>
+#include <linux/fs.h>
 #endif
 
 /* Internal headers */
 #include "config.h"
-#include "utilities.h"
 #include "file.h"
+#include "utilities.h"
 
 /* External libraries */
 #include <glib.h>
 
 #if HAVE_LIBELF
-#include <libelf.h>
 #include <gelf.h>
+#include <libelf.h>
 #endif
 
 #if HAVE_BLKID

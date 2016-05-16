@@ -26,8 +26,8 @@
 #ifndef RM_TRAVERSE_H
 #define RM_TRAVERSE_H
 
-#include "md-scheduler.h"
 #include "formats.h"
+#include "md-scheduler.h"
 
 typedef struct RmTraverseFile {
     size_t size;

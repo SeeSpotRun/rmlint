@@ -22,8 +22,8 @@
 * Hosted on http://github.com/sahib/rmlint
 **/
 
-#include <string.h>
 #include <stdbool.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "cfg.h"

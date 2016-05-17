@@ -1009,8 +1009,6 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredGroup *group) {
                                                                  ? file->path_index + 1
                                                                  : file->dev);
     rm_mds_device_ref(file->disk, 1, FALSE);
-    rm_shred_send(shredder, NULL, 1,
-                  (gint64)file->file_size - file->hash_offset);
 
     rm_assert_gentle(group);
     rm_shred_group_push_file(group, file);

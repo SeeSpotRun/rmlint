@@ -169,6 +169,7 @@ static void rm_session_traverse_pipe(RmTraverseFile *file, RmSession *session) {
                 g_slist_prepend(session->tables->all_files, real);
 
             session->counters->total_files++;
+            session->counters->shred_bytes_remaining += real->file_size - real->hash_offset;
             rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
         }
     }
@@ -180,12 +181,13 @@ static void rm_session_traverse_pipe(RmTraverseFile *file, RmSession *session) {
  * Assumes safe access to session->tables->other_lint and session->counters.
  */
 static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
+    session->counters->total_filtered_files--;
+    session->counters->shred_bytes_remaining -= file->file_size;
+
     if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         /* bundled hardlink is counted as filtered file */
         rm_assert_gentle(file->hardlinks.hardlink_head);
-        session->counters->total_filtered_files--;
     } else if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
-        session->counters->total_filtered_files--;
         rm_fmt_write(file, session->formats, 1);
         if(!session->cfg->cache_file_structs) {
             rm_file_destroy(file);
@@ -193,13 +195,11 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
     } else if(file->lint_type >= RM_LINT_TYPE_OTHER) {
         rm_assert_gentle(file->lint_type <= RM_LINT_TYPE_DUPE_CANDIDATE);
         /* filtered reject based on mtime, --keep, etc */
-        session->counters->total_filtered_files--;
         rm_file_destroy(file);
     } else {
         /* collect "other lint" for later processing */
         session->tables->other_lint[file->lint_type] =
             g_slist_prepend(session->tables->other_lint[file->lint_type], file);
-        session->counters->total_filtered_files--;
         session->counters->other_lint_cnt++;
     }
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
@@ -295,9 +295,6 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
     if(buffer->delta_bytes == 0 && buffer->delta_files == 0 && !buffer->finished_files) {
         /* special signal for end of shred preprocessing */
         session->state = RM_PROGRESS_STATE_SHREDDER;
-        session->counters->shred_bytes_after_preprocess =
-            session->counters->shred_bytes_remaining;
-        session->counters->shred_bytes_total = session->counters->shred_bytes_remaining;
     }
 
     session->counters->shred_files_remaining += buffer->delta_files;
@@ -328,7 +325,6 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
     }
 
     rm_shred_buffer_free(buffer);
-    rm_assert_gentle(session->state >= RM_PROGRESS_STATE_SHREDDER_PREPROCESS);
     rm_fmt_set_state(session->formats, session->state);
 }
 
@@ -413,8 +409,13 @@ int rm_session_run(RmSession *session) {
 
     if(session->tables->size_groups && (cfg->find_duplicates || cfg->merge_directories)) {
         /* run dupe finder */
-        session->state = RM_PROGRESS_STATE_SHREDDER_PREPROCESS;
-        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER_PREPROCESS);
+        session->counters->shred_bytes_after_preprocess =
+            session->counters->shred_bytes_remaining;
+        session->counters->shred_bytes_total = session->counters->shred_bytes_remaining;
+        session->counters->shred_files_remaining = session->counters->total_filtered_files;
+
+        session->state = RM_PROGRESS_STATE_SHREDDER;
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER);
 
         GThreadPool *shredder_pipe =
             rm_util_thread_pool_new((GFunc)rm_session_shredder_pipe, session, 1, FALSE);

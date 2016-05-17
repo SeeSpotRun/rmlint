@@ -184,7 +184,7 @@ static gint rm_mds_compare(const RmMDSTask *a, const RmMDSTask *b,
 
 static void rm_mds_device_sort(_UNUSED dev_t disk, RmMDSDevice *device, RmMDS *mds) {
     rm_log_debug_line("Sorting disk %lu", disk);
-    if(device->prioritiser) {
+    if(device->prioritiser && rm_mds_device_ref(device, 0, FALSE) > 0) {
         g_thread_pool_set_sort_function(device->pool, (GCompareDataFunc)rm_mds_compare,
                                         device->prioritiser);
         g_thread_pool_set_sort_function(device->pool, NULL, NULL);
@@ -215,7 +215,7 @@ static void rm_mds_factory(RmMDSTask *task, RmMDSDevice *device) {
 static void rm_mds_device_start(_UNUSED guint disk, RmMDSDevice *device,
                                 RmMDS *mds) {
     rm_mds_device_ref(device, 1, TRUE);
-    rm_log_info_line("rm_mds_device_start for %lu with %d threads", device->disk,
+    rm_log_debug_line("rm_mds_device_start for %lu with %d threads", device->disk,
                      device->threads);
 
     device->prioritiser = (device->is_rotational) ? mds->hdd_prioritiser : mds->ssd_prioritiser;

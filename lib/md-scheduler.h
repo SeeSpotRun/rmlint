@@ -209,7 +209,14 @@ void rm_mds_push_task(RmMDSDevice *device,
                       const char *path,
                       const gpointer task_data);
 
+/**
+ * @brief prevent mds from starting any jobs; new jobs pushed will be queued
+ **/
 void rm_mds_pause(RmMDS *mds);
+
+/**
+ * @brief sort and resume a paused mds or force a sort of a running one
+ **/
 void rm_mds_resume(RmMDS *mds);
 
 /**

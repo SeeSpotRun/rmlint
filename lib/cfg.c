@@ -61,12 +61,13 @@ void rm_cfg_set_default(RmCfg *cfg) {
     cfg->with_stdout_color = true;
     cfg->with_stderr_color = true;
     cfg->threads = 16;
-    cfg->threads_per_disk = 2;
+    cfg->threads_per_hdd = 2;
+    cfg->threads_per_ssd = 4;
     cfg->verbosity = G_LOG_LEVEL_INFO;
     cfg->follow_symlinks = false;
 
     cfg->total_mem = (RmOff)1024 * 1024 * 1024;
-    cfg->sweep_count = 1024 * 16;
+    cfg->sweep_count = 1024 * 1024;
 
     cfg->skip_start_factor = 0.0;
     cfg->skip_end_factor = 1.0;

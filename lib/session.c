@@ -353,8 +353,7 @@ int rm_session_run(RmSession *session) {
         rm_log_debug_line("No mount table created.");
     }
 
-    session->mds =
-        rm_mds_new(cfg->threads_per_disk, session->mounts, cfg->fake_pathindex_as_disk);
+    session->mds = rm_mds_new(session->mounts, cfg->fake_pathindex_as_disk);
 
     if(cfg->merge_directories) {
         rm_assert_gentle(cfg->cache_file_structs);

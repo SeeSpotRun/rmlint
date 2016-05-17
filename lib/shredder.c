@@ -1468,19 +1468,19 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                      (RmMDSFunc)rm_shred_process_file,
                      &shredder,
                      cfg->sweep_count,
-                     cfg->threads_per_disk,
-                     (RmMDSSortFunc)rm_mds_elevator_cmp);
+                     cfg->threads_per_hdd,
+                     cfg->threads_per_ssd,
+                     (RmMDSSortFunc)rm_mds_elevator_cmp,
+                     NULL);
     rm_mds_start(shredder.mds);
 
-    /* optional (reduces speed but makes counting nicer):
-     * rm_mds_pause(shredder.mds);
-     */
+    /* optional (reduces speed but makes counting nicer): */
+    rm_mds_pause(shredder.mds);
 
     rm_shred_preprocess_input(&shredder, tables);
 
-    /* optional (see above):
-     * rm_mds_resume(shredder.mds);
-     */
+    /* optional (see above): */
+    rm_mds_resume(shredder.mds);
 
     /* should complete shred session and then free: */
     rm_mds_free(shredder.mds, FALSE);

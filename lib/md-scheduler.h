@@ -127,7 +127,7 @@ typedef gint (*RmMDSSortFunc)(const RmMDSTask *task_a, const RmMDSTask *task_b);
  * session_user_data will be passed to task callback.
  *
  **/
-RmMDS *rm_mds_new(const gint threads_per_ssd, RmMountTable *mount_table, bool fake_disk);
+RmMDS *rm_mds_new(RmMountTable *mount_table, bool fake_disk);
 
 /**
  * @brief Configure or reconfigure an MDS scheduler
@@ -142,8 +142,10 @@ void rm_mds_configure(RmMDS *self,
                       const RmMDSFunc func,
                       const gpointer user_data,
                       const gint pass_quota,
+                      const gint threads_per_hdd,
                       const gint threads_per_ssd,
-                      RmMDSSortFunc prioritiser);
+                      RmMDSSortFunc hdd_prioritiser,
+                      RmMDSSortFunc ssd_prioritiser);
 
 /**
  * @brief start a paused MDS scheduler

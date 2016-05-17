@@ -95,7 +95,8 @@ typedef struct RmCfg {
     RmOff minsize;
     RmOff maxsize;
     RmOff threads;
-    guint threads_per_disk;
+    guint threads_per_hdd;
+    guint threads_per_ssd;
     RmDigestType checksum_type;
 
     /* total number of bytes we are allowed to use (target only) */

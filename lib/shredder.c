@@ -336,8 +336,7 @@ typedef struct RmShredTag {
 
 #define HAS_CACHE(shredder) (shredder->cfg->read_cksum_from_xattr)
 
-#define NEEDS_SHADOW_HASH(cfg) \
-    (TRUE || cfg->merge_directories || cfg->read_cksum_from_xattr)
+#define NEEDS_SHADOW_HASH(cfg) (cfg->merge_directories || cfg->read_cksum_from_xattr)
 /* Performance is faster with shadow hash, probably due to hash collisions in
  * large RmShredGroups */
 
@@ -364,9 +363,6 @@ typedef struct RmShredGroup {
     /* number of pending digests (ignores bundled hardlink files)*/
     gulong num_pending;
 
-    /* list of in-progress paranoid digests, used for pre-matching */
-    GList *in_progress_digests;
-
     /* set if group has 1 or more files from "preferred" paths */
     bool has_pref : 1;
 
@@ -375,9 +371,6 @@ typedef struct RmShredGroup {
 
     /* set if group has 1 or more files newer than cfg->min_mtime */
     bool has_new : 1;
-
-    /* set if group has been greenlighted by paranoid mem manager */
-    bool is_active : 1;
 
     /* true if all files in the group have an external checksum */
     bool has_only_ext_cksums : 1;
@@ -421,42 +414,6 @@ typedef struct RmShredGroup {
     /* Reference to main */
     RmShredTag *shredder;
 } RmShredGroup;
-
-typedef struct RmSignal {
-    GMutex lock;
-    GCond cond;
-    gboolean done;
-} RmSignal;
-
-static RmSignal *rm_signal_new(void) {
-    RmSignal *self = g_slice_new(RmSignal);
-    g_mutex_init(&self->lock);
-    g_cond_init(&self->cond);
-    self->done = FALSE;
-    return self;
-}
-
-static void rm_signal_wait(RmSignal *signal) {
-    g_mutex_lock(&signal->lock);
-    {
-        while(!signal->done) {
-            g_cond_wait(&signal->cond, &signal->lock);
-        }
-    }
-    g_mutex_unlock(&signal->lock);
-    g_mutex_clear(&signal->lock);
-    g_cond_clear(&signal->cond);
-    g_slice_free(RmSignal, signal);
-}
-
-static void rm_signal_done(RmSignal *signal) {
-    g_mutex_lock(&signal->lock);
-    {
-        signal->done = TRUE;
-        g_cond_signal(&signal->cond);
-    }
-    g_mutex_unlock(&signal->lock);
-}
 
 /////////// RmShredGroup ////////////////
 
@@ -666,8 +623,6 @@ static void rm_shred_group_free(RmShredGroup *self, bool free_digest) {
          * for each RmShredGroup member of self->children: */
         g_hash_table_unref(self->children);
     }
-
-    rm_assert_gentle(!self->in_progress_digests);
 
     g_mutex_clear(&self->lock);
 
@@ -883,11 +838,6 @@ static RmFile *rm_shred_sift(RmFile *file) {
     g_mutex_lock(&current_group->lock);
     {
         current_group->num_pending--;
-        if(current_group->in_progress_digests) {
-            /* remove this file from current_group's pending digests list */
-            current_group->in_progress_digests =
-                g_list_remove(current_group->in_progress_digests, file->digest);
-        }
 
         if(file->status == RM_FILE_STATE_IGNORE) {
             /* reading/hashing failed somewhere */
@@ -915,12 +865,6 @@ static RmFile *rm_shred_sift(RmFile *file) {
                 g_hash_table_insert(current_group->children, child_group->digest,
                                     child_group);
                 child_group->has_only_ext_cksums = current_group->has_only_ext_cksums;
-
-                /* signal any pending (paranoid) digests that there is a new match
-                 * candidate digest */
-                g_list_foreach(current_group->in_progress_digests,
-                               (GFunc)rm_digest_send_match_candidate,
-                               child_group->digest);
             }
             rm_assert_gentle(child_group);
             result = rm_shred_group_push_file(child_group, file);
@@ -955,13 +899,7 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
         rm_xattr_write_hash(shredder->cfg, file);
     }
 
-    if(file->shredder_waiting) {
-        /* MDS scheduler is waiting for result */
-        rm_signal_done(file->signal);
-    } else {
-        /* handle the file ourselves; MDS scheduler has moved on to the next file */
-        rm_shred_sift(file);
-    }
+    rm_shred_sift(file);
 }
 
 ////////////////////////////////////
@@ -1028,8 +966,6 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredGroup *group) {
         }
     }
 }
-
-/* TODO: replace main and tag with shredder */
 
 static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     /* push files to shred group */
@@ -1167,7 +1103,7 @@ void rm_shred_group_find_original(RmCfg *cfg, GQueue *files, RmShredGroupStatus 
 //    ACTUAL IMPLEMENTATION    //
 /////////////////////////////////
 
-static bool rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
+static void rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
     RmCfg *cfg = shredder->cfg;
     RmShredGroup *group = file->shred_group;
 
@@ -1189,39 +1125,7 @@ static bool rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
             group->has_only_ext_cksums = 0;
         }
     } else if(group->digest_type == RM_DIGEST_PARANOID) {
-        /* get the required target offset into group->next_offset, so that
-         * we can make the paranoid RmDigest the right size*/
-        g_mutex_lock(&group->lock);
-        {
-            if(group->next_offset == 0) {
-                (void)rm_shred_get_read_size(file, shredder);
-            }
-            rm_assert_gentle(group->hash_offset == file->hash_offset);
-        }
-        g_mutex_unlock(&group->lock);
-
         file->digest = rm_digest_new(RM_DIGEST_PARANOID, 0, 0, 0, NEEDS_SHADOW_HASH(cfg));
-
-        if((file->is_symlink == false || cfg->see_symlinks == false) &&
-           (group->next_offset > file->hash_offset + SHRED_PREMATCH_THRESHOLD)) {
-            /* send candidate twin(s) */
-            g_mutex_lock(&group->lock);
-            {
-                if(group->children) {
-                    GList *children = g_hash_table_get_values(group->children);
-                    while(children) {
-                        RmShredGroup *child = children->data;
-                        rm_digest_send_match_candidate(file->digest, child->digest);
-                        children = g_list_delete_link(children, children);
-                    }
-                }
-                /* store a reference so the shred group knows where to send any future
-                 * twin candidate digests */
-                group->in_progress_digests =
-                    g_list_prepend(group->in_progress_digests, file->digest);
-            }
-            g_mutex_unlock(&group->lock);
-        }
     } else if(group->digest) {
         /* pick up the digest-so-far from the RmShredGroup */
         file->digest = rm_digest_copy(group->digest);
@@ -1232,16 +1136,6 @@ static bool rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
                                      cfg->hash_seed2,
                                      0,
                                      NEEDS_SHADOW_HASH(cfg));
-    }
-    return true;
-}
-
-/* call with device unlocked */
-static bool rm_shred_can_process(RmFile *file, RmShredTag *shredder) {
-    if(file->digest) {
-        return TRUE;
-    } else {
-        return rm_shred_reassign_checksum(shredder, file);
     }
 }
 
@@ -1265,69 +1159,36 @@ static gint rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
         return 1;
     }
 
-    gint result = 0;
     RM_DEFINE_PATH(file);
 
-    while(file && rm_shred_can_process(file, shredder)) {
-        result = 1;
-        /* hash the next increment of the file */
-        RmCfg *cfg = shredder->cfg;
-        RmOff bytes_to_read = rm_shred_get_read_size(file, shredder);
-
-        gboolean shredder_waiting =
-            (file->shred_group->next_offset != file->file_size) &&
-            (cfg->shred_always_wait ||
-             (!cfg->shred_never_wait && rm_mds_device_is_rotational(file->disk) &&
-              bytes_to_read < SHRED_TOO_MANY_BYTES_TO_WAIT));
-        RmHasherTask *task = rm_hasher_task_new(shredder->hasher, file->digest, file);
-        if(!rm_hasher_task_hash(task, file_path, file->hash_offset, bytes_to_read,
-                                file->is_symlink)) {
-            /* rm_hasher_start_increment failed somewhere */
-            file->status = RM_FILE_STATE_IGNORE;
-            shredder_waiting = FALSE;
-        }
-
-        /* Update totals for file, device and session*/
-        file->hash_offset += bytes_to_read;
-        if(file->is_symlink) {
-            rm_shred_send(shredder, NULL, 0, -(gint64)file->file_size);
-        } else {
-            rm_shred_send(shredder, NULL, 0, -(gint64)bytes_to_read);
-        }
-
-        if(shredder_waiting) {
-            /* some final checks if it's still worth waiting for the hash result */
-            shredder_waiting =
-                shredder_waiting &&
-                /* no point waiting if we have no siblings */
-                file->shred_group->children &&
-                /* no point waiting if paranoid digest with no twin candidates */
-                (file->digest->type != RM_DIGEST_PARANOID ||
-                 file->digest->paranoid->twin_candidate);
-        }
-        file->signal = shredder_waiting ? rm_signal_new() : NULL;
-        file->shredder_waiting = shredder_waiting;
-
-        /* tell the hasher we have finished */
-        rm_hasher_task_finish(task);
-
-        if(shredder_waiting) {
-            /* wait until the increment has finished hashing; assert that we get the
-             * expected file back */
-            rm_signal_wait(file->signal);
-            file->signal = NULL;
-            /* sift file; if returned then continue processing it */
-            file = rm_shred_sift(file);
-        } else {
-            /* rm_shred_hash_callback will take care of the file */
-            file = NULL;
-        }
+    if(!file->digest) {
+        rm_shred_reassign_checksum(shredder, file);
     }
-    if(file) {
-        /* file was not handled by rm_shred_sift so we need to add it back to the queue */
-        rm_mds_push_task(file->disk, file->dev, file->disk_offset, NULL, file);
+    /* hash the next increment of the file */
+    RmOff bytes_to_read = rm_shred_get_read_size(file, shredder);
+
+    RmHasherTask *task = rm_hasher_task_new(shredder->hasher, file->digest, file);
+    if(!rm_hasher_task_hash(task, file_path, file->hash_offset, bytes_to_read,
+                            file->is_symlink)) {
+        /* rm_hasher_start_increment failed somewhere */
+        file->status = RM_FILE_STATE_IGNORE;
     }
-    return result;
+
+    /* Update totals for file, device and session*/
+    file->hash_offset += bytes_to_read;
+    if(file->is_symlink) {
+        rm_shred_send(shredder, NULL, 0, -(gint64)file->file_size);
+    } else {
+        rm_shred_send(shredder, NULL, 0, -(gint64)bytes_to_read);
+    }
+
+    /* tell the hasher we have finished */
+    rm_hasher_task_finish(task);
+
+    /* rm_shred_hash_callback will take care of the file */
+    file = NULL;
+
+    return 1;
 }
 
 void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,

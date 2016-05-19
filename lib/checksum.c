@@ -289,7 +289,6 @@ RmDigest *rm_digest_new(RmDigestType type, RmOff seed1, RmOff seed2, RmOff ext_s
     case RM_DIGEST_PARANOID:
         digest->bytes = 0;
         digest->paranoid = g_slice_new0(RmParanoid);
-        digest->paranoid->incoming_twin_candidates = g_async_queue_new();
         if(use_shadow_hash) {
             digest->paranoid->shadow_hash =
                 rm_digest_new(RM_DIGEST_XXHASH, seed1, seed2, 0, false);
@@ -350,10 +349,6 @@ void rm_digest_free(RmDigest *digest) {
             rm_digest_free(digest->paranoid->shadow_hash);
         }
         rm_digest_release_buffers(digest);
-        if(digest->paranoid->incoming_twin_candidates) {
-            g_async_queue_unref(digest->paranoid->incoming_twin_candidates);
-        }
-        g_slist_free(digest->paranoid->rejects);
         g_slice_free(RmParanoid, digest->paranoid);
         break;
     case RM_DIGEST_EXT:
@@ -502,59 +497,6 @@ void rm_digest_buffered_update(RmBuffer *buffer) {
         if(paranoid->shadow_hash) {
             rm_digest_update(paranoid->shadow_hash, buffer->data, buffer->len);
         }
-
-        if(paranoid->twin_candidate) {
-            /* do a running check that digest remains the same as its candidate twin */
-            if(rm_buffer_equal(buffer, paranoid->twin_candidate_buffer->data)) {
-                /* buffers match; move ptr to next one ready for next buffer */
-                paranoid->twin_candidate_buffer = paranoid->twin_candidate_buffer->next;
-            } else {
-                /* buffers don't match - delete candidate (new candidate might be added on
-                 * next
-                 * call to rm_digest_buffered_update) */
-                paranoid->twin_candidate = NULL;
-                paranoid->twin_candidate_buffer = NULL;
-#if _RM_CHECKSUM_DEBUG
-                rm_log_debug_line("Ejected candidate match at buffer #%u",
-                                  g_slist_length(paranoid->buffers));
-#endif
-            }
-        }
-
-        while(!paranoid->twin_candidate && paranoid->incoming_twin_candidates &&
-              (paranoid->twin_candidate =
-                   g_async_queue_try_pop(paranoid->incoming_twin_candidates))) {
-            /* validate the new candidate by comparing the previous buffers (not
-             * including current)*/
-            paranoid->twin_candidate_buffer = paranoid->twin_candidate->paranoid->buffers;
-            GSList *iter_self = paranoid->buffers;
-            gboolean match = TRUE;
-            while(match && iter_self) {
-                match = (rm_buffer_equal(paranoid->twin_candidate_buffer->data,
-                                         iter_self->data));
-                iter_self = iter_self->next;
-                paranoid->twin_candidate_buffer = paranoid->twin_candidate_buffer->next;
-            }
-            if(paranoid->twin_candidate && !match) {
-/* reject the twin candidate, also add to rejects list to speed up rm_digest_equal() */
-#if _RM_CHECKSUM_DEBUG
-                rm_log_debug_line("Rejected twin candidate %p for %p",
-                                  paranoid->twin_candidate, paranoid);
-#endif
-                if(!paranoid->shadow_hash) {
-                    /* we use the rejects file to speed up rm_digest_equal */
-                    paranoid->rejects =
-                        g_slist_prepend(paranoid->rejects, paranoid->twin_candidate);
-                }
-                paranoid->twin_candidate = NULL;
-                paranoid->twin_candidate_buffer = NULL;
-#if _RM_CHECKSUM_DEBUG
-            } else {
-                rm_log_debug_line("Added twin candidate %p for %p",
-                                  paranoid->twin_candidate, paranoid);
-#endif
-            }
-        }
     }
 }
 
@@ -695,16 +637,9 @@ gboolean rm_digest_equal(RmDigest *a, RmDigest *b) {
     if(a->type == RM_DIGEST_PARANOID) {
         if(!a->paranoid->buffers) {
             /* buffers have been freed so we need to rely on shadow hash */
+            rm_assert_gentle(a->paranoid->shadow_hash);
+            rm_assert_gentle(b->paranoid->shadow_hash);
             return rm_digest_equal(a->paranoid->shadow_hash, b->paranoid->shadow_hash);
-        }
-        /* check if pre-matched twins */
-        if(a->paranoid->twin_candidate == b || b->paranoid->twin_candidate == a) {
-            return true;
-        }
-        /* check if already rejected */
-        if(g_slist_find(a->paranoid->rejects, b) ||
-           g_slist_find(b->paranoid->rejects, a)) {
-            return false;
         }
         /* all the "easy" ways failed... do manual check of all buffers */
         GSList *a_iter = a->paranoid->buffers;
@@ -712,9 +647,11 @@ gboolean rm_digest_equal(RmDigest *a, RmDigest *b) {
         guint bytes = 0;
         while(a_iter && b_iter) {
             if(!rm_buffer_equal(a_iter->data, b_iter->data)) {
-                rm_log_error_line(
-                    "Paranoid digest compare found mismatch - must be hash collision in "
-                    "shadow hash");
+                if(a->paranoid->shadow_hash) {
+                    rm_log_error_line(
+                        "Paranoid digest compare found mismatch - must be hash collision "
+                        "in shadow hash");
+                }
                 return false;
             }
             bytes += ((RmBuffer *)a_iter->data)->len;
@@ -790,11 +727,4 @@ int rm_digest_get_bytes(RmDigest *self) {
     } else {
         return 0;
     }
-}
-
-void rm_digest_send_match_candidate(RmDigest *target, RmDigest *candidate) {
-    if(!target->paranoid->incoming_twin_candidates) {
-        target->paranoid->incoming_twin_candidates = g_async_queue_new();
-    }
-    g_async_queue_push(target->paranoid->incoming_twin_candidates, candidate);
 }

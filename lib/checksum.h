@@ -71,19 +71,6 @@ typedef struct RmParanoid {
      */
     struct RmDigest *shadow_hash;
 
-    /* Optional: if known, a potentially matching *completed* RMDigest
-     * can be provided and will be progressively compared against
-     * this RmDigest *during* rm_digest_buffered_update(); this speeds
-     * up subsequent calls to rm_digest_equal() significantly.
-     */
-    struct RmDigest *twin_candidate;
-
-    /* Pointer to current buffer in twin_candidate->paranoid->buffers */
-    GSList *twin_candidate_buffer;
-    GSList *rejects;
-
-    /* Optional: incoming queue for additional twin candidate RmDigest's */
-    GAsyncQueue *incoming_twin_candidates;
 } RmParanoid;
 
 typedef struct RmDigest {
@@ -331,10 +318,5 @@ RmBuffer *rm_buffer_get(RmBufferPool *pool);
  * It will be either cached or freed if over the limit.
  */
 void rm_buffer_release(RmBuffer *buf);
-
-/**
- * @brief Send a new (pending) paranoid digest match `candidate` for `target`.
- */
-void rm_digest_send_match_candidate(RmDigest *target, RmDigest *candidate);
 
 #endif /* end of include guard */

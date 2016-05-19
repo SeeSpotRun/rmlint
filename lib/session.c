@@ -169,7 +169,8 @@ static void rm_session_traverse_pipe(RmTraverseFile *file, RmSession *session) {
                 g_slist_prepend(session->tables->all_files, real);
 
             session->counters->total_files++;
-            session->counters->shred_bytes_remaining += real->file_size - real->hash_offset;
+            session->counters->shred_bytes_remaining +=
+                real->file_size - real->hash_offset;
             rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
         }
     }
@@ -412,7 +413,8 @@ int rm_session_run(RmSession *session) {
         session->counters->shred_bytes_after_preprocess =
             session->counters->shred_bytes_remaining;
         session->counters->shred_bytes_total = session->counters->shred_bytes_remaining;
-        session->counters->shred_files_remaining = session->counters->total_filtered_files;
+        session->counters->shred_files_remaining =
+            session->counters->total_filtered_files;
 
         session->state = RM_PROGRESS_STATE_SHREDDER;
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER);

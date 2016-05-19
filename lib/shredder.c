@@ -537,13 +537,13 @@ static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
  * filesystems are contemplated)
  */
 static gint64 rm_shred_mem_adjust(RmShredTag *shredder, gint files, gint64 size) {
-    if (shredder->after_preprocess || shredder->cfg->checksum_type != RM_DIGEST_PARANOID) {
+    if(shredder->after_preprocess || shredder->cfg->checksum_type != RM_DIGEST_PARANOID) {
         return 1;
     }
     gint64 result;
     g_mutex_lock(&shredder->hash_mem_mtx);
     {
-        shredder->paranoid_mem_alloc += (gint64) files * MIN(size, SHRED_PARANOID_BYTES);
+        shredder->paranoid_mem_alloc += (gint64)files * MIN(size, SHRED_PARANOID_BYTES);
         result = shredder->paranoid_mem_alloc;
         g_cond_signal(&shredder->hash_mem_cond);
     }
@@ -598,14 +598,15 @@ static void rm_shred_send(RmShredTag *shredder, GQueue *files, gint delta_files,
     }
 
     /* adjust hash mem allowance */
-    if (delta_files != 0) {
-        if (file_size == 0) {
+    if(delta_files != 0) {
+        if(file_size == 0) {
             file_size = delta_bytes / delta_files;
         }
         rm_shred_mem_adjust(shredder, -delta_files, file_size);
     }
     /* send to session.c */
-    g_thread_pool_push(shredder->shredder_pipe, rm_shred_buffer_new(files, delta_files, delta_bytes), NULL);
+    g_thread_pool_push(shredder->shredder_pipe,
+                       rm_shred_buffer_new(files, delta_files, delta_bytes), NULL);
 }
 
 /* Unlink dead RmFile from Shredder
@@ -1044,7 +1045,6 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     g_slist_foreach(files, (GFunc)rm_shred_file_preprocess, group);
     g_slist_free(files);
 
-
     /* check if group has external checksums for all files */
     if(HAS_CACHE(shredder) && group->num_files == group->num_ext_cksums) {
         group->has_only_ext_cksums = true;
@@ -1057,9 +1057,9 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     /* check paranoid mem avail - hold back groups if out of mem */
     g_mutex_lock(&shredder->hash_mem_mtx);
     {
-        while (shredder->paranoid_mem_alloc <= 0) {
+        while(shredder->paranoid_mem_alloc <= 0) {
             rm_log_debug_line("shredder: waiting for mem");
-            if (shredder->mds_paused) {
+            if(shredder->mds_paused) {
                 rm_mds_resume(shredder->mds);
                 shredder->mds_paused = FALSE;
             }
@@ -1187,7 +1187,6 @@ static bool rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
             group->has_only_ext_cksums = 0;
         }
     } else if(group->digest_type == RM_DIGEST_PARANOID) {
-
         /* get the required target offset into group->next_offset, so that
          * we can make the paranoid RmDigest the right size*/
         g_mutex_lock(&group->lock);

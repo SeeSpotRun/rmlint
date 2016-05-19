@@ -205,20 +205,21 @@ static void rm_mds_factory(RmMDSTask *task, RmMDSDevice *device) {
 
     device->mds->func(task->task_data, device->mds->user_data);
     rm_mds_task_free(task);
-    if(device->prioritiser && g_atomic_int_dec_and_test(&device->sorted_tasks) && !rm_session_was_aborted()) {
+    if(device->prioritiser && g_atomic_int_dec_and_test(&device->sorted_tasks) &&
+       !rm_session_was_aborted()) {
         rm_mds_device_sort(device->disk, device, mds);
     }
 }
 
 /** @brief Start an RmMDSDevice (prototyped as GHFunc)
  **/
-static void rm_mds_device_start(_UNUSED guint disk, RmMDSDevice *device,
-                                RmMDS *mds) {
+static void rm_mds_device_start(_UNUSED guint disk, RmMDSDevice *device, RmMDS *mds) {
     rm_mds_device_ref(device, 1, TRUE);
     rm_log_debug_line("rm_mds_device_start for %lu with %d threads", device->disk,
-                     device->threads);
+                      device->threads);
 
-    device->prioritiser = (device->is_rotational) ? mds->hdd_prioritiser : mds->ssd_prioritiser;
+    device->prioritiser =
+        (device->is_rotational) ? mds->hdd_prioritiser : mds->ssd_prioritiser;
 
     device->pool =
         rm_util_thread_pool_new((GFunc)rm_mds_factory, device, device->threads, FALSE);
@@ -407,7 +408,7 @@ void rm_mds_push_task(RmMDSDevice *device, dev_t dev, gint64 offset, const char 
     RmMDSTask *task = rm_mds_task_new(dev, offset, task_data);
     rm_util_thread_pool_push(device->pool, task);
 
-    if (!device->mds->paused && !device->prioritiser) {
+    if(!device->mds->paused && !device->prioritiser) {
         g_thread_pool_move_to_front(device->pool, task);
     }
 }

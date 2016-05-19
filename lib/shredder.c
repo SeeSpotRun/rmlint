@@ -271,35 +271,27 @@
 // TO COMPARE PROGRESSIVE HASHES          //
 ////////////////////////////////////////////
 
-/* how many pages can we read in (seek_time)/(CHEAP)? (use for initial read) */
-#define SHRED_BALANCED_PAGES (4)
+/* how many bytes to use for initial read (will be rounded up to a whole page) */
+#define SHRED_FIRST_INCREMENT (16 * 1024)
 
-/* How large a single page is (typically 4096 bytes but not always)*/
-#define SHRED_PAGE_SIZE (sysconf(_SC_PAGESIZE))
-
-#define SHRED_MAX_READ_FACTOR \
-    ((256 * 1024 * 1024) / SHRED_BALANCED_PAGES / SHRED_PAGE_SIZE)
+/* Maximum increment size for digests; increments bigger than this would
+ * give negligible seek savings and risk hashing past the point where two
+ * files diverge
+ */
+#define SHRED_MAX_INCREMENT (256 * 1024 * 1024)
 
 /* Maximum increment size for paranoid digests.  This is smaller than for other
  * digest types due to memory management issues.
- * 16MB should be big enough buffer size to make seek time fairly insignificant
- * relative to sequential read time, eg 16MB read at typical 100 MB/s read
- * rate = 160ms read vs typical seek time 10ms*/
-#define SHRED_PARANOID_BYTES (16 * 1024 * 1024)
+ * 16MB read at typical 100 MB/s read rate = 160ms read vs typical seek time 10ms
+ * so the speed penalty is around 6% */
+#define SHRED_MAX_PARANOID (16 * 1024 * 1024)
 
-/* When paranoid hashing, if a file increments is larger
- * than SHRED_PREMATCH_THRESHOLD, we take a guess at the likely
- * matching file and do a progressive memcmp() on each buffer
- * rather than waiting until the whole increment has been read
- * */
-#define SHRED_PREMATCH_THRESHOLD (0)
+/* How quickly to (geometrically) increase increment size */
+#define SHRED_ACCELERATION (8)
 
 /* empirical estimate of mem usage per file (excluding read buffers and
  * paranoid digests) */
 #define SHRED_AVERAGE_MEM_PER_FILE (100)
-
-/* Maximum number of bytes before worth_waiting becomes false */
-#define SHRED_TOO_MANY_BYTES_TO_WAIT (64 * 1024 * 1024)
 
 ///////////////////////////////////////////////////////////////////////
 //    INTERNAL STRUCTURES, WITH THEIR INITIALISERS AND DESTROYERS    //
@@ -317,8 +309,9 @@ typedef struct RmShredTag {
     RmMDS *mds;
     /* threadpool for sending files and progress updates to session.c */
     GThreadPool *shredder_pipe;
-    gint32 page_size;
-    bool mem_refusing;
+    RmOff buffer_size;
+    RmOff first_increment;
+    RmOff max_increment;
 
     GMutex lock;
 
@@ -396,12 +389,6 @@ typedef struct RmShredGroup {
     /* file hash_offset when files arrived in this group */
     RmOff hash_offset;
 
-    /* file hash_offset for next increment */
-    RmOff next_offset;
-
-    /* Factor of SHRED_BALANCED_PAGES to read next time */
-    gint64 offset_factor;
-
     /* checksum structure taken from first file to enter the group.  This allows
      * digests to be released from RmFiles and memory freed up until they
      * are required again for further hashing.*/
@@ -431,12 +418,6 @@ static RmShredGroup *rm_shred_group_new(RmFile *file, RmShredTag *shredder) {
     self->parent = file->shred_group;
     self->shredder = shredder;
 
-    if(self->parent) {
-        self->offset_factor = MIN(self->parent->offset_factor * 8, SHRED_MAX_READ_FACTOR);
-    } else {
-        self->offset_factor = 1;
-    }
-
     self->held_files = g_queue_new();
     self->file_size = file->file_size;
     self->hash_offset = file->hash_offset;
@@ -453,38 +434,23 @@ static RmShredGroup *rm_shred_group_new(RmFile *file, RmShredTag *shredder) {
 
 /* Compute optimal size for next hash increment call this with group locked */
 static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
-    RmShredGroup *group = file->shred_group;
-    rm_assert_gentle(group);
+    rm_assert_gentle(file->hash_offset < file->file_size);
 
-    gint32 result = 0;
+    RmOff target = file->hash_offset * SHRED_ACCELERATION + shredder->first_increment;
+    /* eg for first_increment == 10 and SHRED_ACCELERATION == 4
+     *   -> 10,  50,  210,  850...
+     *    (+10)(+40)(+160)(+640)...
+     */
 
-    /* calculate next_offset property of the RmShredGroup */
-    RmOff balanced_bytes = shredder->page_size * SHRED_BALANCED_PAGES;
-    RmOff target_bytes = balanced_bytes * group->offset_factor;
-    if(group->next_offset == 2) {
-        file->fadvise_requested = 1;
-    }
+    /* don't over-shoot file */
+    target = MIN(target, file->file_size);
 
-    /* round to even number of pages, round up to MIN_READ_PAGES */
-    RmOff target_pages = MAX(target_bytes / shredder->page_size, 1);
-    target_bytes = target_pages * shredder->page_size;
+    RmOff result = target - file->hash_offset;
 
-    /* test if cost-effective to read the whole file */
-    if(group->hash_offset + target_bytes + (balanced_bytes) >= group->file_size) {
-        group->next_offset = group->file_size;
-        file->fadvise_requested = 1;
-    } else {
-        group->next_offset = group->hash_offset + target_bytes;
-    }
+    /* don't exceed max increment */
+    result = MIN(result, shredder->max_increment);
 
-    /* for paranoid digests, make sure next read is not > max size of paranoid buffer */
-    if(group->digest_type == RM_DIGEST_PARANOID) {
-        group->next_offset =
-            MIN(group->next_offset, group->hash_offset + SHRED_PARANOID_BYTES);
-    }
-
-    result = (group->next_offset - file->hash_offset);
-
+    rm_assert_gentle(result > 0);
     return result;
 }
 
@@ -493,14 +459,20 @@ static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
  * filesystems are contemplated)
  */
 static gint64 rm_shred_mem_adjust(RmShredTag *shredder, gint files, gint64 size) {
-    if(shredder->after_preprocess || shredder->cfg->checksum_type != RM_DIGEST_PARANOID) {
+    if(shredder->after_preprocess) {
+        /* all files in play; no need for memory governer */
+        return 1;
+    }
+    if(shredder->cfg->checksum_type != RM_DIGEST_PARANOID) {
+        /* no memory governer */
         return 1;
     }
     gint64 result;
     g_mutex_lock(&shredder->hash_mem_mtx);
     {
-        shredder->paranoid_mem_alloc += (gint64)files * MIN(size, SHRED_PARANOID_BYTES);
+        shredder->paranoid_mem_alloc += (gint64)files * MIN(size, SHRED_MAX_PARANOID);
         result = shredder->paranoid_mem_alloc;
+        /* rm_shred_preprocess_group may be waiting... */
         g_cond_signal(&shredder->hash_mem_cond);
     }
     g_mutex_unlock(&shredder->hash_mem_mtx);
@@ -511,17 +483,17 @@ static gint64 rm_shred_mem_adjust(RmShredTag *shredder, gint files, gint64 size)
 //       Progress Reporting      //
 ///////////////////////////////////
 
-void rm_shred_buffer_free(RmShredBuffer *buffer) {
-    /* do not free group; caller owns that */
-    g_slice_free(RmShredBuffer, buffer);
-}
-
 RmShredBuffer *rm_shred_buffer_new(GQueue *files, gint delta_files, gint64 delta_bytes) {
     RmShredBuffer *buffer = g_slice_new(RmShredBuffer);
     buffer->delta_files = delta_files;
     buffer->delta_bytes = delta_bytes;
     buffer->finished_files = files;
     return buffer;
+}
+
+void rm_shred_buffer_free(RmShredBuffer *buffer) {
+    /* do not free buffer->finished_files; caller keeps ownership of that */
+    g_slice_free(RmShredBuffer, buffer);
 }
 
 /* send updates and/or results to session.c */
@@ -539,8 +511,10 @@ static void rm_shred_send(RmShredTag *shredder, GQueue *files, gint delta_files,
 
         /* unref files from MDS */
         /* TODO: maybe do this in rm_shred_group_find_original */
+        /* don't double-count: */
         rm_assert_gentle(delta_bytes == 0);
         rm_assert_gentle(delta_files == 0);
+
         for(GList *iter = files->head; iter; iter = iter->next) {
             RmFile *file = iter->data;
             if(!RM_IS_BUNDLED_HARDLINK(file)) {
@@ -556,6 +530,7 @@ static void rm_shred_send(RmShredTag *shredder, GQueue *files, gint delta_files,
     /* adjust hash mem allowance */
     if(delta_files != 0) {
         if(file_size == 0) {
+            /* rm_shred_mem_adjust needs to know file size... */
             file_size = delta_bytes / delta_files;
         }
         rm_shred_mem_adjust(shredder, -delta_files, file_size);
@@ -575,7 +550,6 @@ static void rm_shred_discard_file(RmFile *file) {
     /* session.c expects files in a GQueue; can't send file directly*/
     GQueue *coffin = g_queue_new();
     g_queue_push_head(coffin, file);
-
     rm_shred_send(shredder, coffin, 0, 0);
 }
 
@@ -734,7 +708,6 @@ static void rm_shred_group_make_orphan(RmShredGroup *self) {
 
 /* returns the number of actual files (including bundled
  * hardlinks) associated with an RmFile */
-
 static gint rm_shred_num_files(RmFile *file) {
     if(file->hardlinks.is_head) {
         rm_assert_gentle(file->hardlinks.files);
@@ -888,7 +861,6 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
         file->digest = digest;
     }
     rm_assert_gentle(file->digest == digest);
-    rm_assert_gentle(file->hash_offset == file->shred_group->next_offset);
 
     if(file->lint_type != RM_LINT_TYPE_READ_ERROR &&
        shredder->cfg->write_cksum_to_xattr && file->has_ext_cksum == false) {
@@ -1179,13 +1151,21 @@ static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
 void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                   GThreadPool *shredder_pipe, guint total_files) {
     RmShredTag shredder;
-    shredder.mem_refusing = false;
     shredder.shredder_pipe = shredder_pipe;
     shredder.cfg = cfg;
     shredder.mds = mds;
     shredder.paranoid_mem_alloc = G_MAXINT64;
 
-    shredder.page_size = SHRED_PAGE_SIZE;
+    shredder.buffer_size = sysconf(_SC_PAGESIZE);
+    shredder.first_increment =
+        MAX(1, SHRED_FIRST_INCREMENT / shredder.buffer_size) * shredder.buffer_size;
+    if(cfg->checksum_type == RM_DIGEST_PARANOID) {
+        shredder.max_increment =
+            MAX(1, SHRED_MAX_PARANOID / shredder.buffer_size) * shredder.buffer_size;
+    } else {
+        shredder.max_increment =
+            MAX(1, SHRED_MAX_INCREMENT / shredder.buffer_size) * shredder.buffer_size;
+    }
 
     shredder.after_preprocess = FALSE;  // TODO: eliminate
 
@@ -1230,7 +1210,7 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
     shredder.hasher = rm_hasher_new(cfg->checksum_type,
                                     cfg->threads,
                                     cfg->use_buffered_read,
-                                    SHRED_PAGE_SIZE * 4,
+                                    shredder.buffer_size,
                                     read_buffer_mem,
                                     (RmHasherCallback)rm_shred_hash_callback,
                                     &shredder);

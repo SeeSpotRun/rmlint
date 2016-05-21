@@ -272,7 +272,7 @@
 ////////////////////////////////////////////
 
 /* how many bytes to use for initial read (will be rounded up to a whole page) */
-#define SHRED_FIRST_INCREMENT (16 * 1024)
+#define SHRED_FIRST_INCREMENT (4 * 1024)
 
 /* Maximum increment size for digests; increments bigger than this would
  * give negligible seek savings and risk hashing past the point where two
@@ -287,7 +287,7 @@
 #define SHRED_MAX_PARANOID (16 * 1024 * 1024)
 
 /* How quickly to (geometrically) increase increment size */
-#define SHRED_ACCELERATION (8)
+#define SHRED_ACCELERATION (4)
 
 /* empirical estimate of mem usage per file (excluding read buffers and
  * paranoid digests) */

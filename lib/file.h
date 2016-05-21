@@ -34,18 +34,6 @@
 #include "pathtricia.h"
 #include "utilities.h"
 
-typedef enum RmFileState {
-    /* File still processing
-     */
-    RM_FILE_STATE_NORMAL,
-
-    /* File can be ignored, has a unique hash, gets read failure
-     * or is elsewhise not noteworthy.
-     */
-    RM_FILE_STATE_IGNORE,
-
-} RmFileState;
-
 /* types of lint */
 typedef enum RmLintType {
     RM_LINT_TYPE_UNKNOWN = 0,
@@ -88,6 +76,8 @@ typedef enum RmLintType {
      * This is mainly useful for caching.
      */
     RM_LINT_TYPE_UNIQUE_FILE,
+    /* Files that were buffered when shredder was interrupted */
+    RM_LINT_TYPE_INTERRUPTED,
 } RmLintType;
 
 struct RmSession;
@@ -206,10 +196,6 @@ typedef struct RmFile {
     * (lower or equal file_size)
     */
     RmOff hash_offset;
-
-    /* Flag for when we do intermediate steps within a hash increment because the file is
-     * fragmented */
-    RmFileState status;
 
     /* digest of this file updated on every hash iteration.  Use a pointer so we can share
      * with RmShredGroup

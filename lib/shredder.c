@@ -483,7 +483,6 @@ static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
             MIN(group->next_offset, group->hash_offset + SHRED_PARANOID_BYTES);
     }
 
-    file->status = RM_FILE_STATE_NORMAL;
     result = (group->next_offset - file->hash_offset);
 
     return result;
@@ -568,9 +567,8 @@ static void rm_shred_send(RmShredTag *shredder, GQueue *files, gint delta_files,
 
 /* Unlink dead RmFile from Shredder
  */
-static void rm_shred_discard_file(RmFile *file, RmLintType lint_type) {
+static void rm_shred_discard_file(RmFile *file) {
     rm_assert_gentle(file);
-    file->lint_type = lint_type;
     rm_assert_gentle(file->shred_group->shredder);
     RmShredTag *shredder = file->shred_group->shredder;
 
@@ -834,14 +832,13 @@ static RmFile *rm_shred_sift(RmFile *file) {
     rm_assert_gentle(file);
     RmShredGroup *current_group = file->shred_group;
     rm_assert_gentle(current_group);
-
     g_mutex_lock(&current_group->lock);
     {
         current_group->num_pending--;
 
-        if(file->status == RM_FILE_STATE_IGNORE) {
+        if(file->lint_type != RM_LINT_TYPE_DUPE_CANDIDATE) {
             /* reading/hashing failed somewhere */
-            rm_shred_discard_file(file, RM_LINT_TYPE_READ_ERROR);
+            rm_shred_discard_file(file);
 
         } else {
             rm_assert_gentle(file->digest);
@@ -893,8 +890,8 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
     rm_assert_gentle(file->digest == digest);
     rm_assert_gentle(file->hash_offset == file->shred_group->next_offset);
 
-    if(file->status != RM_FILE_STATE_IGNORE && shredder->cfg->write_cksum_to_xattr &&
-       file->has_ext_cksum == false) {
+    if(file->lint_type != RM_LINT_TYPE_READ_ERROR &&
+       shredder->cfg->write_cksum_to_xattr && file->has_ext_cksum == false) {
         /* remember that checksum */
         rm_xattr_write_hash(shredder->cfg, file);
     }
@@ -1033,7 +1030,8 @@ static gint rm_shred_remove_basename_matches(RmFile *file, RmFile *headfile) {
         return 0;
     }
     /* TODO: report as ?unique? file */
-    rm_shred_discard_file(file, RM_LINT_TYPE_BASENAME_TWIN);
+    file->lint_type = RM_LINT_TYPE_BASENAME_TWIN;
+    rm_shred_discard_file(file);
     return 1;
 }
 
@@ -1142,7 +1140,7 @@ static void rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
 static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     if(rm_session_was_aborted() || file->shred_group->has_only_ext_cksums) {
         if(rm_session_was_aborted()) {
-            file->status = RM_FILE_STATE_IGNORE;
+            file->lint_type = RM_LINT_TYPE_INTERRUPTED;
         } else if(file->shred_group->has_only_ext_cksums) {
             rm_shred_reassign_checksum(shredder, file);
         }
@@ -1163,11 +1161,11 @@ static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     if(!rm_hasher_task_hash(task, file_path, file->hash_offset, bytes_to_read,
                             file->is_symlink)) {
         /* rm_hasher_start_increment failed somewhere */
-        file->status = RM_FILE_STATE_IGNORE;
+        file->lint_type = RM_LINT_TYPE_READ_ERROR;
     }
+    file->hash_offset += bytes_to_read;
 
     /* Update totals for file, device and session*/
-    file->hash_offset += bytes_to_read;
     if(file->is_symlink) {
         rm_shred_send(shredder, NULL, 0, -(gint64)file->file_size);
     } else {

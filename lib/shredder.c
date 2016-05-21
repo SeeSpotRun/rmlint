@@ -1137,13 +1137,9 @@ static void rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
     }
 }
 
-/* Callback for RmMDS
- * Return value of 1 tells md-scheduler that we have processed the file and either
- * disposed of it or pushed it back to the scheduler queue.
- * Return value of 0 tells md-scheduler we can't process the file right now, and
- * have pushed it back to the queue.
- * */
-static gint rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
+/** Callback for RmMDS
+ **/
+static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     if(rm_session_was_aborted() || file->shred_group->has_only_ext_cksums) {
         if(rm_session_was_aborted()) {
             file->status = RM_FILE_STATE_IGNORE;
@@ -1152,18 +1148,18 @@ static gint rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
         }
         file->shredder_waiting = FALSE;
         rm_shred_sift(file);
-        return 1;
+        return;
     }
-
-    RM_DEFINE_PATH(file);
 
     if(!file->digest) {
         rm_shred_reassign_checksum(shredder, file);
+        /*TODO: needs some debugging */
     }
     /* hash the next increment of the file */
     RmOff bytes_to_read = rm_shred_get_read_size(file, shredder);
 
     RmHasherTask *task = rm_hasher_task_new(shredder->hasher, file->digest, file);
+    RM_DEFINE_PATH(file);
     if(!rm_hasher_task_hash(task, file_path, file->hash_offset, bytes_to_read,
                             file->is_symlink)) {
         /* rm_hasher_start_increment failed somewhere */
@@ -1180,11 +1176,6 @@ static gint rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
 
     /* tell the hasher we have finished */
     rm_hasher_task_finish(task);
-
-    /* rm_shred_hash_callback will take care of the file */
-    file = NULL;
-
-    return 1;
 }
 
 void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,

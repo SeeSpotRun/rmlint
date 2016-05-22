@@ -323,38 +323,44 @@ typedef struct RmShredTag {
 
 } RmShredTag;
 
-#define NEEDS_PREF(group) (group->shredder->cfg->must_match_tagged)
-#define NEEDS_NPREF(group) (group->shredder->cfg->keep_all_tagged)
-#define NEEDS_NEW(group) (group->shredder->cfg->min_mtime)
-
 #define HAS_CACHE(shredder) (shredder->cfg->read_cksum_from_xattr)
 
 #define NEEDS_SHADOW_HASH(cfg) (cfg->merge_directories || cfg->read_cksum_from_xattr)
-/* Performance is faster with shadow hash, probably due to hash collisions in
- * large RmShredGroups */
 
-typedef struct RmShredGroup {
-    /* holding queue for files; they are held here until the group first meets
-     * criteria for further hashing (normally just 2 or more files, but sometimes
-     * related to preferred path counts)
-     * */
-    GQueue *held_files;
+/** RmShredNode is a node of an RmShredGroup which represents a cluster of files
+ * with identical [partial] hashes
+ **/
+typedef struct RmShredNode {
+    /* the tree to which we belong */
+    struct RmShredTree *tree;
 
-    /* link(s) to next generation of RmShredGroups(s) which have this RmShredGroup as
-     * parent*/
-    GHashTable *children;
+    /* parent node or NULL for first level of tree */
+    struct RmShredNode *parent;
 
-    /* RmShredGroup of the same size files but with lower RmFile->hash_offset;
-     * getsset to null when parent dies
-     * */
-    struct RmShredGroup *parent;
+    /* files which don't need hashing (yet) - either have finished hashing
+     * or don't yet have enough candidate files */
+    GSList *held_files;
 
-    /* total number of files that have passed through this group (including
-     * bundled hardlinked files) */
-    gulong num_files;
+    /* once the node's files qualify for hashing, they are queued to MDS and
+     * will return again via rm_shred_sift;
+     * num_pending tracks how many hashing jobs are still pending */
+    guint32 num_pending;
 
-    /* number of pending digests (ignores bundled hardlink files)*/
-    gulong num_pending;
+    /* once files return from hashing, they are grouped into child nodes;
+     * note: a hashtable might be faster in corner cases but a GSList uses
+     * less memory */
+    GSList *children;
+
+    /** counters and flags for deciding whether node's files need further hashing
+     * note: nodes with more than ~4 billion files (G_MAXUINT32) are not supported
+     * but we would probably run out of RAM well before that anyway
+     **/
+
+    /* number of files (including bundled hardlinked files) in self + children */
+    guint32 num_files;
+
+    /* number of files (excluding bundled hardlinked files) in self + children */
+    guint32 num_inodes;
 
     /* set if group has 1 or more files from "preferred" paths */
     bool has_pref : 1;
@@ -368,63 +374,108 @@ typedef struct RmShredGroup {
     /* true if all files in the group have an external checksum */
     bool has_only_ext_cksums : 1;
 
-    /* incremented for each file in the group that obtained its checksum from ext.
-     * If all files came from there we do not even need to hash the group.
-     */
-    gulong num_ext_cksums;
-
     /* if whole group has same basename, pointer to first file, else null */
     RmFile *unique_basename;
 
-    /* initially RM_SHRED_GROUP_DORMANT; triggered as soon as we have >= 2 files
-     * and meet preferred path and will go to either RM_SHRED_GROUP_HASHING or
-     * RM_SHRED_GROUP_FINISHING.  When switching from dormant to hashing, all
-     * held_files are released and future arrivals go straight to hashing
-     * */
-    RmShredGroupStatus status;
+    /* whether the node has sufficient files to qualify as a dupe group */
+    gboolean qualifies : 1;
 
-    /* file size of files in this group */
-    RmOff file_size;
+    /* whether this is the final increment for member files (ie EOF) */
+    gboolean final : 1;
 
-    /* file hash_offset when files arrived in this group */
-    RmOff hash_offset;
-
-    /* checksum structure taken from first file to enter the group.  This allows
-     * digests to be released from RmFiles and memory freed up until they
-     * are required again for further hashing.*/
-    RmDigestType digest_type;
+    /* checksum of first file to enter the group */
     RmDigest *digest;
 
-    /* lock for access to this RmShredGroup */
+} RmShredNode;
+
+/** initialises an RmShredNode based on file;
+ * note: assumes node is already memset to all zeros
+ **/
+static void rm_shred_node_init(RmShredNode *node, RmFile *file) {
+    if(file->shred_node) {
+        /* should be true unless this is first node of tree */
+        node->parent = file->shred_node;
+        node->tree = node->parent->tree;
+        rm_assert_gentle(file->digest);
+        node->digest = file->digest;
+        file->digest = NULL;
+    }
+    node->final = (file->hash_offset == file->file_size);
+}
+
+/** allocate and initialise a new RmShredNode based on file;
+ * takes ownership of file's digest.
+ **/
+static RmShredNode *rm_shred_node_new(RmFile *file) {
+    RmShredNode *self = g_slice_new0(RmShredNode);
+    rm_shred_node_init(self, file);
+
+    return self;
+}
+
+/** Free an RmShredNode
+ **/
+static void rm_shred_node_free(RmShredNode *node) {
+    rm_assert_gentle(!node->held_files);
+    rm_assert_gentle(!node->children);
+    /* don't free top-level node; it is embedded in RmShredTree */
+    rm_assert_gentle((gpointer)node != (gpointer)node->tree);
+
+    if(node->digest) {
+        rm_digest_free(node->digest);
+    }
+    g_slice_free(RmShredNode, node);
+}
+
+/** RmShredTree is a group of same-sized files; as the files are incrementally
+ * hashed and compared, the tree may branch out into multiple nodes
+ **/
+typedef struct RmShredTree {
+    /* tree of [partially] matched nodes
+     * note: must be first so that tree can be cast as a node
+     */
+    RmShredNode head;
+
+    /* reference count to decide when to free tree */
+    gint32 remaining_files;
+
+    /* lock for access to the tree and its nodes */
     GMutex lock;
+
+    /* memory allocation for paranoid hashing */
+    gint64 paranoid_mem_alloc;
 
     /* Reference to main */
     RmShredTag *shredder;
-} RmShredGroup;
+} RmShredTree;
 
-/////////// RmShredGroup ////////////////
+/* allocate and initialise new RmShredTree using file as a template*/
+static RmShredTree *rm_shred_tree_new(RmShredTag *shredder, RmFile *file) {
+    RmShredTree *tree = g_new0(RmShredTree, 1);
 
-/* allocate and initialise new RmShredGroup; uses file's digest type if available */
-static RmShredGroup *rm_shred_group_new(RmFile *file, RmShredTag *shredder) {
-    RmShredGroup *self = g_slice_new0(RmShredGroup);
+    tree->shredder = shredder;
+    rm_shred_node_init(&tree->head, file);
+    tree->head.tree = tree;
 
-    rm_assert_gentle(shredder);
-    if(file->digest) {
-        self->digest_type = file->digest->type;
-        self->digest = file->digest;
-        file->digest = NULL;
+    g_mutex_init(&tree->lock);
+
+    return tree;
+}
+
+static void rm_shred_tree_free(RmShredTree *tree) {
+    rm_assert_gentle(!tree->head.held_files);
+    rm_assert_gentle(!tree->head.children);
+    if(tree->paranoid_mem_alloc != 0) {
+        RmShredTag *shredder = tree->shredder;
+        g_mutex_lock(&shredder->hash_mem_mtx);
+        {
+            shredder->paranoid_mem_alloc += tree->paranoid_mem_alloc;
+            g_cond_signal(&shredder->hash_mem_cond);
+        }
+        g_mutex_unlock(&shredder->hash_mem_mtx);
     }
-
-    self->parent = file->shred_group;
-    self->shredder = shredder;
-
-    self->held_files = g_queue_new();
-    self->file_size = file->file_size;
-    self->hash_offset = file->hash_offset;
-
-    g_mutex_init(&self->lock);
-
-    return self;
+    g_mutex_clear(&tree->lock);
+    g_free(tree);
 }
 
 //////////////////////////////////
@@ -432,7 +483,7 @@ static RmShredGroup *rm_shred_group_new(RmFile *file, RmShredTag *shredder) {
 // MANAGEMENT ALGORITHMS        //
 //////////////////////////////////
 
-/* Compute optimal size for next hash increment call this with group locked */
+/* Compute optimal size for next hash increment */
 static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
     rm_assert_gentle(file->hash_offset < file->file_size);
 
@@ -454,36 +505,11 @@ static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
     return result;
 }
 
-/* Memory manager (only used for RM_DIGEST_PARANOID at the moment
- * but could also be adapted for other digests if very large
- * filesystems are contemplated)
- */
-static gint64 rm_shred_mem_adjust(RmShredTag *shredder, gint files, gint64 size) {
-    if(shredder->after_preprocess) {
-        /* all files in play; no need for memory governer */
-        return 1;
-    }
-    if(shredder->cfg->checksum_type != RM_DIGEST_PARANOID) {
-        /* no memory governer */
-        return 1;
-    }
-    gint64 result;
-    g_mutex_lock(&shredder->hash_mem_mtx);
-    {
-        shredder->paranoid_mem_alloc += (gint64)files * MIN(size, SHRED_MAX_PARANOID);
-        result = shredder->paranoid_mem_alloc;
-        /* rm_shred_preprocess_group may be waiting... */
-        g_cond_signal(&shredder->hash_mem_cond);
-    }
-    g_mutex_unlock(&shredder->hash_mem_mtx);
-    return result;
-}
-
 ///////////////////////////////////
 //       Progress Reporting      //
 ///////////////////////////////////
 
-RmShredBuffer *rm_shred_buffer_new(GQueue *files, gint delta_files, gint64 delta_bytes) {
+RmShredBuffer *rm_shred_buffer_new(GSList *files, gint delta_files, gint64 delta_bytes) {
     RmShredBuffer *buffer = g_slice_new(RmShredBuffer);
     buffer->delta_files = delta_files;
     buffer->delta_bytes = delta_bytes;
@@ -497,13 +523,11 @@ void rm_shred_buffer_free(RmShredBuffer *buffer) {
 }
 
 /* send updates and/or results to session.c */
-static void rm_shred_send(RmShredTag *shredder, GQueue *files, gint delta_files,
+static void rm_shred_send(RmShredTag *shredder, GSList *files, gint delta_files,
                           gint64 delta_bytes) {
-    gint64 file_size = 0;
     if(files) {
-        RmFile *head = files->head->data;
+        RmFile *head = files->data;
         rm_assert_gentle(head);
-        file_size = head->file_size;
 #if _RM_SHRED_DEBUG
         RM_DEFINE_PATH(head);
         rm_log_debug_line("Forwarding %s's group", head_path);
@@ -511,11 +535,11 @@ static void rm_shred_send(RmShredTag *shredder, GQueue *files, gint delta_files,
 
         /* unref files from MDS */
         /* TODO: maybe do this in rm_shred_group_find_original */
-        /* don't double-count: */
+        /* check we don't double-count: */
         rm_assert_gentle(delta_bytes == 0);
         rm_assert_gentle(delta_files == 0);
 
-        for(GList *iter = files->head; iter; iter = iter->next) {
+        for(GSList *iter = files; iter; iter = iter->next) {
             RmFile *file = iter->data;
             if(!RM_IS_BUNDLED_HARDLINK(file)) {
                 rm_assert_gentle(file->disk);
@@ -527,34 +551,25 @@ static void rm_shred_send(RmShredTag *shredder, GQueue *files, gint delta_files,
         }
     }
 
-    /* adjust hash mem allowance */
-    if(delta_files != 0) {
-        if(file_size == 0) {
-            /* rm_shred_mem_adjust needs to know file size... */
-            file_size = delta_bytes / delta_files;
-        }
-        rm_shred_mem_adjust(shredder, -delta_files, file_size);
-    }
     /* send to session.c */
     g_thread_pool_push(shredder->shredder_pipe,
                        rm_shred_buffer_new(files, delta_files, delta_bytes), NULL);
 }
 
-/* Unlink dead RmFile from Shredder
- */
+/** Send dead RmFile to session.c
+ **/
 static void rm_shred_discard_file(RmFile *file) {
     rm_assert_gentle(file);
-    rm_assert_gentle(file->shred_group->shredder);
-    RmShredTag *shredder = file->shred_group->shredder;
+    rm_assert_gentle(file->shred_node);
+    RmShredTag *shredder = file->shred_node->tree->shredder;
 
-    /* session.c expects files in a GQueue; can't send file directly*/
-    GQueue *coffin = g_queue_new();
-    g_queue_push_head(coffin, file);
+    /* session.c expects files in a GSList; can't send file directly*/
+    GSList *coffin = g_slist_append(NULL, file);
     rm_shred_send(shredder, coffin, 0, 0);
 }
 
-/* Push file to scheduler queue.
- * */
+/** Push file to scheduler queue.
+ **/
 static void rm_shred_push_queue(RmFile *file) {
     if(file->hash_offset == 0) {
         /* first-timer; lookup disk offset */
@@ -574,136 +589,70 @@ static void rm_shred_push_queue(RmFile *file) {
 //    AND SIFTING ALGORITHM     //
 //////////////////////////////////
 
-/* Free RmShredGroup and any dormant files still in its queue
- */
-static void rm_shred_group_free(RmShredGroup *self, bool free_digest) {
-    rm_assert_gentle(self->parent == NULL); /* children should outlive their parents! */
-    rm_assert_gentle(self->num_pending == 0);
+/* some macros to improve readability of rm_shred_node_qualifies */
+#define NEEDS_PREF(cfg) (cfg->must_match_tagged)
+#define NEEDS_NPREF(cfg) (cfg->keep_all_tagged)
+#define NEEDS_NEW(cfg) (cfg->min_mtime)
+#define NEEDS_BASENAMES(cfg) (cfg->unmatched_basenames)
 
-    if(self->held_files) {
-        rm_assert_gentle(self->held_files->length == 0);
+/** Checks whether node qualifies as duplicate candidate (ie more than
+ * two members and meets has_pref and other cfg criteria).
+ * Assume already protected by node->tree->lock.
+ * If true then sets node->qualifies true to avoid needing to re-check.
+ * Call with tree node->tree locked
+ **/
+static gboolean rm_shred_node_qualifies(RmShredNode *node) {
+    if(node->qualifies) {
+        return TRUE;
     }
-
-    if(self->digest && free_digest) {
-        rm_digest_free(self->digest);
-        self->digest = NULL;
-    }
-
-    if(self->children) {
-        /* note: calls GDestroyNotify function rm_shred_group_make_orphan()
-         * for each RmShredGroup member of self->children: */
-        g_hash_table_unref(self->children);
-    }
-
-    g_mutex_clear(&self->lock);
-
-    g_slice_free(RmShredGroup, self);
+    RmCfg *cfg = node->tree->shredder->cfg;
+    node->qualifies =
+        (1 && (node->num_files >= 2) /* it takes 2 to tango */
+         &&
+         (node->has_pref || !NEEDS_PREF(cfg))
+         /* we have at least one file from preferred path, or we don't care */
+         &&
+         (node->has_npref || !NEEDS_NPREF(cfg))
+         /* we have at least one file from non-pref path, or we don't care */
+         &&
+         (node->has_new || !NEEDS_NEW(cfg))
+         /* we have at least one file newer than cfg->min_mtime, or we don't care */
+         &&
+         (!node->unique_basename || !NEEDS_BASENAMES(cfg))
+         /* we have more than one unique basename, or we don't care */
+         );
+    return node->qualifies;
 }
 
-/* prepare a finished shred_group for output */
-static void rm_shred_group_output(RmShredGroup *group) {
-    if(g_queue_get_length(group->held_files) > 0) {
-        /* find the original(s) (note this also unbundles hardlinks and sorts
-         * the group from highest ranked to lowest ranked
-         */
-        rm_shred_group_find_original(group->shredder->cfg, group->held_files,
-                                     group->status);
+/** prepare and output a finished RmShredNode
+ **/
+static void rm_shred_node_output(RmShredNode *node) {
+    rm_assert_gentle(node->held_files);
 
-        /* Point the files to their (shared) digest */
-        for(GList *iter = group->held_files->head; iter; iter = iter->next) {
-            RmFile *file = iter->data;
-            file->digest = group->digest;
-        }
+    RmLintType lint_type = RM_LINT_TYPE_UNKNOWN;
 
-        /* send files to session for output and file freeing */
-        rm_shred_send(group->shredder, group->held_files, 0, 0);
-        group->held_files = NULL;
+    if(rm_shred_node_qualifies(node)) {
+        rm_assert_gentle(node->final);
+        lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
+    } else {
+        lint_type = RM_LINT_TYPE_UNIQUE_FILE;
     }
 
-    if(group->status == RM_SHRED_GROUP_FINISHING) {
-        group->status = RM_SHRED_GROUP_FINISHED;
+    if(node->digest && node->digest->type == RM_DIGEST_PARANOID) {
+        rm_digest_release_buffers(node->digest);
     }
-    /* Do not free digest, output module will do that. */
-    rm_shred_group_free(group, false);
-}
 
-/* call unlocked; should be no contention issues since group is finished */
-static void rm_shred_group_finalise(RmShredGroup *self) {
-    /* return any paranoid mem allocation */
-    switch(self->status) {
-    case RM_SHRED_GROUP_DORMANT:
-        /* Dead-ended files; may still be wanted by some output formatters */
-        rm_shred_group_output(self);
-        break;
-    case RM_SHRED_GROUP_START_HASHING:
-    case RM_SHRED_GROUP_HASHING:
-        /* intermediate increment group no longer required; free group and digest */
-        rm_assert_gentle(!self->held_files);
-        rm_shred_group_free(self, TRUE);
-        break;
-    case RM_SHRED_GROUP_FINISHING:
-        /* free any paranoid buffers held in group->digest (should not be needed for
-         * results processing */
-        if(self->digest_type == RM_DIGEST_PARANOID) {
-            rm_digest_release_buffers(self->digest);
-        }
-        /* send it to finisher (which takes responsibility for calling
-         * rm_shred_group_free())*/
-        /* TODO: direct call */
-        rm_shred_group_output(self);
-        break;
-    case RM_SHRED_GROUP_FINISHED:
-    default:
-        rm_assert_gentle_not_reached();
-    }
-}
+    /* find the original(s) (note this also unbundles hardlinks and sorts
+     * the group from highest ranked to lowest ranked, and points the files
+     * to their (shared) digest
+     */
+    RmShredTag *shredder = node->tree->shredder;
+    node->held_files = rm_shred_group_find_original(shredder->cfg, node->held_files,
+                                                    lint_type, node->digest);
+    node->digest = NULL;
 
-/* Checks whether group qualifies as duplicate candidate (ie more than
- * two members and meets has_pref and NEEDS_PREF criteria).
- * Assume group already protected by group_lock.
- * */
-static void rm_shred_group_update_status(RmShredGroup *group) {
-    if(group->status == RM_SHRED_GROUP_DORMANT) {
-        if(1 && group->num_files >= 2 /* it takes 2 to tango */
-           &&
-           (group->has_pref || !NEEDS_PREF(group))
-           /* we have at least one file from preferred path, or we don't care */
-           &&
-           (group->has_npref || !NEEDS_NPREF(group))
-           /* we have at least one file from non-pref path, or we don't care */
-           &&
-           (group->has_new || !NEEDS_NEW(group))
-           /* we have at least one file newer than cfg->min_mtime, or we don't care */
-           &&
-           (!group->unique_basename || !group->shredder->cfg->unmatched_basenames)
-           /* we have more than one unique basename, or we don't care */
-           ) {
-            if(group->hash_offset < group->file_size &&
-               group->has_only_ext_cksums == false) {
-                /* group can go active */
-                group->status = RM_SHRED_GROUP_START_HASHING;
-            } else {
-                group->status = RM_SHRED_GROUP_FINISHING;
-            }
-        }
-    }
-}
-
-/* Only called by rm_shred_group_free (via GDestroyNotify of group->children).
- * Call with group->lock unlocked.
- */
-static void rm_shred_group_make_orphan(RmShredGroup *self) {
-    gboolean group_finished = FALSE;
-    g_mutex_lock(&self->lock);
-    {
-        self->parent = NULL;
-        group_finished = (self->num_pending == 0);
-    }
-    g_mutex_unlock(&self->lock);
-
-    if(group_finished) {
-        rm_shred_group_finalise(self);
-    }
+    /* send files to session for output and file freeing */
+    rm_shred_send(shredder, node->held_files, 0, 0);
 }
 
 /* returns the number of actual files (including bundled
@@ -717,140 +666,201 @@ static gint rm_shred_num_files(RmFile *file) {
     }
 }
 
-/* Call with shred_group->lock unlocked. */
-static RmFile *rm_shred_group_push_file(RmShredGroup *shred_group, RmFile *file) {
-    RmFile *result = NULL;
-    rm_assert_gentle(shred_group);
-    file->shred_group = shred_group;
+/** rm_shred_node_add_file adds a file to the node unless it needs further
+ * hashing, in which case it is added the the hashing queue instead.
+ * call with tree node->tree locked
+ **/
+static void rm_shred_node_add_file(RmShredNode *node, RmFile *file) {
+    file->shred_node = node;
 
     if(file->digest) {
         rm_digest_free(file->digest);
         file->digest = NULL;
     }
 
-    g_mutex_lock(&shred_group->lock);
-    {
-        shred_group->has_pref |= file->is_prefd || file->hardlinks.has_prefd;
-        shred_group->has_npref |= (!file->is_prefd) || file->hardlinks.has_non_prefd;
-        shred_group->has_new |= file->is_new_or_has_new;
-
-        if(shred_group->num_files == 0 &&
-           shred_group->shredder->cfg->unmatched_basenames) {
-            shred_group->unique_basename = file;
-        } else if(shred_group->unique_basename &&
-                  rm_file_basenames_cmp(file, shred_group->unique_basename) != 0) {
-            shred_group->unique_basename = NULL;
+    /* logic for cfg->unmatched_basenames option */
+    RmCfg *cfg = node->tree->shredder->cfg;
+    if(cfg->unmatched_basenames && node->num_files == 0) {
+        /* first file into group sets the basename */
+        node->unique_basename = file;
+        rm_log_debug_line("Unique basename: %s", file->folder->basename)
+    }
+    if(node->unique_basename) {
+        rm_log_debug_line("Unique basename checking...")
+            /* check if we still have only 1 unique basename... */
+            if(rm_file_basenames_cmp(file, node->unique_basename) != 0) {
+            node->unique_basename = NULL;
+            rm_log_debug_line("Unique basename failed")
         }
-        shred_group->num_files += rm_shred_num_files(file);
-        if(file->hardlinks.is_head && shred_group->unique_basename &&
-           shred_group->shredder->cfg->unmatched_basenames) {
+        else if(file->hardlinks.is_head) {
+            /* also check hardlink names */
             for(GList *iter = file->hardlinks.files->head; iter; iter = iter->next) {
-                if(rm_file_basenames_cmp(iter->data, shred_group->unique_basename) != 0) {
-                    shred_group->unique_basename = NULL;
-                    break;
+                if(rm_file_basenames_cmp(iter->data, node->unique_basename) != 0) {
+                    node->unique_basename = NULL;
+                    rm_log_debug_line("Unique basename failed on hardlink") break;
                 }
             }
         }
-
-        rm_assert_gentle(file->hash_offset == shred_group->hash_offset);
-
-        rm_shred_group_update_status(shred_group);
-        switch(shred_group->status) {
-        case RM_SHRED_GROUP_START_HASHING:
-            /* clear the queue and push all its rmfiles to the md-scheduler */
-            if(shred_group->held_files) {
-                shred_group->num_pending += g_queue_get_length(shred_group->held_files);
-                g_queue_free_full(shred_group->held_files,
-                                  (GDestroyNotify)rm_shred_push_queue);
-                shred_group->held_files = NULL; /* won't need shred_group queue any more,
-                                                   since new arrivals will bypass */
-            }
-        /* FALLTHROUGH */
-        case RM_SHRED_GROUP_HASHING:
-            shred_group->num_pending++;
-            if(!file->shredder_waiting) {
-                /* add file to device queue */
-                rm_shred_push_queue(file);
-            } else {
-                /* calling routine will handle the file */
-                result = file;
-            }
-            break;
-        case RM_SHRED_GROUP_DORMANT:
-        case RM_SHRED_GROUP_FINISHING:
-            /* add file to held_files */
-            g_queue_push_head(shred_group->held_files, file);
-            break;
-        case RM_SHRED_GROUP_FINISHED:
-        default:
-            rm_assert_gentle_not_reached();
+        if(node->unique_basename) {
+            rm_log_debug_line("still unique");
         }
     }
-    g_mutex_unlock(&shred_group->lock);
 
-    return result;
+    /* update node totals */
+    node->num_inodes++;
+    node->num_files += rm_shred_num_files(file); /* includes hardlinks */
+    node->has_pref |= file->is_prefd || file->hardlinks.has_prefd;
+    node->has_npref |= (!file->is_prefd) || file->hardlinks.has_non_prefd;
+    node->has_new |= file->is_new_or_has_new;
+    node->has_only_ext_cksums &= file->has_ext_cksum;
+
+    /* check whether to send for further hashing, or store in the node */
+    if(rm_shred_node_qualifies(node) && !node->final) {
+        /* push any held files to the md-scheduler for hashing */
+        while(node->held_files) {
+            node->num_pending++;
+            RmFile *held = node->held_files->data;
+            rm_shred_push_queue(held);
+            node->held_files = g_slist_delete_link(node->held_files, node->held_files);
+        }
+        /* push the new arrival too */
+        node->num_pending++;
+        rm_shred_push_queue(file);
+    } else {
+        /* hold onto the file */
+        node->held_files = g_slist_prepend(node->held_files, file);
+    }
 }
 
-/* After partial hashing of RmFile, add it back into the sieve for further
- * hashing if required.  If waiting option is set, then try to return the
- * RmFile to the calling routine so it can continue with the next hashing
- * increment (this bypasses the normal device queue and so avoids an unnecessary
- * file seek operation ) returns true if the file can be immediately be hashed
- * some more.
- * */
-static RmFile *rm_shred_sift(RmFile *file) {
-    RmFile *result = NULL;
-    gboolean current_group_finished = FALSE;
+/** check whether a node may still expect incoming files;
+ * call with tree node->tree locked
+ **/
+static gboolean rm_shred_node_has_pending(RmShredNode *node) {
+    if(!node) {
+        return FALSE;
+    }
+    return (node->num_pending > 0 || rm_shred_node_has_pending(node->parent));
+}
 
+/** RmSListRFunc to recursively check if node and its children have finished; if yes then
+ * outputs node's result (if applicable) and, if delete==true, deletes the node from the
+ * tree and frees it
+ * note: if children have finished then they are always deleted and freed.
+ **/
+static gboolean rm_shred_node_finished(RmShredNode *node, _UNUSED RmShredNode *prev,
+                                       gboolean delete) {
+    if(rm_shred_node_has_pending(node)) {
+        /* still waiting for incoming hashes */
+        return FALSE;
+    }
+
+    if(node->held_files) {
+        rm_assert_gentle(!node->children);
+        /* send files to session.c */
+        rm_shred_node_output(node);
+        node->held_files = NULL;
+    }
+
+    if(node->children) {
+        /* remove children recursively if they are finished */
+        rm_util_slist_foreach_remove(
+            &node->children, (RmSListRFunc)rm_shred_node_finished, GINT_TO_POINTER(TRUE));
+    }
+    /* anything left? */
+    if(node->children == NULL) {
+        if(delete) {
+            rm_shred_node_free(node);
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/** detach a node from tree; recursively move upwards, detaching parent nodes
+ * if they too are finished.  If this results in a completely denuded tree then
+ * return true.
+ **/
+static gboolean rm_shred_node_prune(RmShredNode *node) {
+    rm_assert_gentle(!node->children);
+    rm_assert_gentle(!node->held_files);
+    RmShredNode *parent = node->parent;
+    if(!parent) {
+        /* top of tree reached */
+        rm_assert_gentle(node->tree == (RmShredTree *)node);
+        rm_assert_gentle(!node->held_files);
+        rm_assert_gentle(!node->children);
+        return TRUE;
+    }
+
+    /* remove self from parent and free self */
+    parent->children = g_slist_remove(parent->children, node);
+    rm_shred_node_free(node);
+
+    /* recurse upwards? */
+    if(rm_shred_node_finished(parent, NULL, FALSE)) {
+        return rm_shred_node_prune(parent);
+    } else {
+        /* parent still busy */
+        return FALSE;
+    }
+}
+
+/** After partial hashing of RmFile, maybe add it back into the file tree;
+ * or if further hashing is required then put into hashing queue instead.
+ * Note rm_shred_reschedule also does any pruning of branches that die as
+ * a result.  If the last branch is removed then the tree will be freed.
+ **/
+static void rm_shred_reschedule(RmFile *file) {
     rm_assert_gentle(file);
-    RmShredGroup *current_group = file->shred_group;
-    rm_assert_gentle(current_group);
-    g_mutex_lock(&current_group->lock);
+    RmShredNode *current = file->shred_node;
+    rm_assert_gentle(current);
+    RmShredTree *tree = current->tree;
+    rm_assert_gentle(tree);
+
+    gboolean free_tree = FALSE;
+
+    g_mutex_lock(&tree->lock);
     {
-        current_group->num_pending--;
+        current->num_pending--;
 
         if(file->lint_type != RM_LINT_TYPE_DUPE_CANDIDATE) {
-            /* reading/hashing failed somewhere */
+            /* reading/hashing failed somewhere; don't reinsert into tree */
             rm_shred_discard_file(file);
 
         } else {
+            /* find right node to reinsert into tree */
             rm_assert_gentle(file->digest);
-
-            /* check is child group hashtable has been created yet */
-            if(current_group->children == NULL) {
-                current_group->children =
-                    g_hash_table_new_full((GHashFunc)rm_digest_hash,
-                                          (GEqualFunc)rm_digest_equal,
-                                          NULL,
-                                          (GDestroyNotify)rm_shred_group_make_orphan);
+            RmShredNode *child = NULL;
+            for(GSList *iter = current->children; iter; iter = iter->next) {
+                RmShredNode *candidate = iter->data;
+                if(rm_digest_equal(candidate->digest, file->digest)) {
+                    child = candidate;
+                    break;
+                }
             }
-
-            /* check if there is already a descendent of current_group which
-             * matches snap... if yes then move this file into it; if not then
-             * create a new group ... */
-            RmShredGroup *child_group =
-                g_hash_table_lookup(current_group->children, file->digest);
-            if(!child_group) {
-                child_group = rm_shred_group_new(file, current_group->shredder);
-                g_hash_table_insert(current_group->children, child_group->digest,
-                                    child_group);
-                child_group->has_only_ext_cksums = current_group->has_only_ext_cksums;
+            if(!child) {
+                child = rm_shred_node_new(file);
+                current->children = g_slist_prepend(current->children, child);
             }
-            rm_assert_gentle(child_group);
-            result = rm_shred_group_push_file(child_group, file);
+            /* add file to child node, or maybe send it to hashing queue */
+            rm_shred_node_add_file(child, file);
         }
 
-        /* is current shred group needed any longer? */
-        current_group_finished =
-            !current_group->parent && current_group->num_pending == 0;
+        /* check if current group (and its children) have finished; if yes
+         * then do some pruning of the tree */
+        if(rm_shred_node_finished(current, NULL, FALSE)) {
+            /* all children have been removed and current node will
+             * never receive more files;
+             * remove current node from tree, rucursing up the tree to
+             * remove dead parents */
+            free_tree = rm_shred_node_prune(current);
+        }
     }
-    g_mutex_unlock(&current_group->lock);
+    g_mutex_unlock(&tree->lock);
 
-    if(current_group_finished) {
-        rm_shred_group_finalise(current_group);
+    if(free_tree) {
+        rm_shred_tree_free(tree);
     }
-
-    return result;
 }
 
 /* Hasher callback when file increment hashing is completed.
@@ -868,7 +878,7 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
         rm_xattr_write_hash(shredder->cfg, file);
     }
 
-    rm_shred_sift(file);
+    rm_shred_reschedule(file);
 }
 
 ////////////////////////////////////
@@ -889,9 +899,9 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
 /* Called for each file; find appropriate RmShredGroup (ie files with same size) and
  * push the file to it.
  * */
-static void rm_shred_file_preprocess(RmFile *file, RmShredGroup *group) {
-    /* initial population of RmShredDevice's and first level RmShredGroup's */
-    RmShredTag *shredder = group->shredder;
+static void rm_shred_file_preprocess(RmFile *file, RmShredTree *tree) {
+    /* initial population of RmShredTree's and linking to RmMDS devices */
+    RmShredTag *shredder = tree->shredder;
     RmCfg *cfg = shredder->cfg;
 
     rm_assert_gentle(file);
@@ -918,9 +928,6 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredGroup *group) {
                                                                  : file->dev);
     rm_mds_device_ref(file->disk, 1, FALSE);
 
-    rm_assert_gentle(group);
-    rm_shred_group_push_file(group, file);
-
     if(cfg->read_cksum_from_xattr) {
         char *ext_cksum = rm_xattr_read_hash(shredder->cfg, file);
         if(ext_cksum != NULL) {
@@ -930,9 +937,13 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredGroup *group) {
 
     if(HAS_CACHE(shredder)) {
         if(rm_trie_search(&cfg->file_trie, file_path)) {
-            group->num_ext_cksums += 1;
-            file->has_ext_cksum = 1;
+            file->has_ext_cksum = TRUE;
         }
+    }
+
+    rm_shred_node_add_file(&tree->head, file);
+    if(cfg->checksum_type == RM_DIGEST_PARANOID) {
+        tree->paranoid_mem_alloc += MIN(file->file_size, shredder->max_increment);
     }
 }
 
@@ -942,36 +953,39 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     rm_assert_gentle(files->data);
 
     RmFile *first = files->data;
-    RmShredGroup *group = rm_shred_group_new(first, shredder);
-    group->parent = GINT_TO_POINTER(1); /* dummy parent to prevent premature free */
-    group->digest_type = shredder->cfg->checksum_type;
-    group->shredder = shredder;
+    RmShredTree *tree = rm_shred_tree_new(shredder, first);
+    gboolean launch_failure = FALSE;
 
-    g_slist_foreach(files, (GFunc)rm_shred_file_preprocess, group);
-    g_slist_free(files);
-
-    /* check if group has external checksums for all files */
-    if(HAS_CACHE(shredder) && group->num_files == group->num_ext_cksums) {
-        group->has_only_ext_cksums = true;
-    }
-
-    rm_assert_gentle(group);
-    /* give the group its independence */
-    rm_shred_group_make_orphan(group);
-
-    /* check paranoid mem avail - hold back groups if out of mem */
-    g_mutex_lock(&shredder->hash_mem_mtx);
+    g_mutex_lock(&tree->lock);
     {
-        while(shredder->paranoid_mem_alloc <= 0) {
-            rm_log_debug_line("shredder: waiting for mem");
-            if(shredder->mds_paused) {
-                rm_mds_resume(shredder->mds);
-                shredder->mds_paused = FALSE;
-            }
-            g_cond_wait(&shredder->hash_mem_cond, &shredder->hash_mem_mtx);
-        }
+        g_slist_foreach(files, (GFunc)rm_shred_file_preprocess, tree);
+        g_slist_free(files);
+        launch_failure = rm_shred_node_finished(&tree->head, NULL, FALSE);
     }
-    g_mutex_unlock(&shredder->hash_mem_mtx);
+    g_mutex_unlock(&tree->lock);
+    if(launch_failure) {
+        tree->paranoid_mem_alloc = 0;
+    }
+
+    if(tree->paranoid_mem_alloc > 0) {
+        g_mutex_lock(&shredder->hash_mem_mtx);
+        {
+            rm_log_debug_line("shredder: mem %li to %li", shredder->paranoid_mem_alloc,
+                              shredder->paranoid_mem_alloc - tree->paranoid_mem_alloc);
+            shredder->paranoid_mem_alloc -= tree->paranoid_mem_alloc;
+            /* check paranoid mem avail before proceeding to next group */
+            while(shredder->paranoid_mem_alloc <= 0) {
+                rm_log_debug_line("shredder: waiting for mem");
+                if(shredder->mds_paused) {
+                    rm_mds_resume(shredder->mds);
+                    shredder->mds_paused = FALSE;
+                }
+                g_cond_wait(&shredder->hash_mem_cond, &shredder->hash_mem_mtx);
+            }
+            rm_log_debug_line("shred mem ok");
+        }
+        g_mutex_unlock(&shredder->hash_mem_mtx);
+    }
 }
 
 static void rm_shred_preprocess_input(RmShredTag *shredder, RmFileTables *tables) {
@@ -994,14 +1008,17 @@ static void rm_shred_preprocess_input(RmShredTag *shredder, RmFileTables *tables
 /* Discard files with same basename as headfile.
  * (RmRFunc for rm_util_queue_foreach_remove).
  */
-static gint rm_shred_remove_basename_matches(RmFile *file, RmFile *headfile) {
+static gint rm_shred_remove_basename_matches(RmFile *file, _UNUSED RmFile *prev,
+                                             RmFile *headfile) {
     if(file == headfile) {
         return 0;
     }
     if(rm_file_basenames_cmp(file, headfile) != 0) {
         return 0;
     }
-    /* TODO: report as ?unique? file */
+    /* TODO: how should formats report this? */
+    RM_DEFINE_PATH(file);
+    rm_log_debug_line("removing basename twin %s", file_path);
     file->lint_type = RM_LINT_TYPE_BASENAME_TWIN;
     rm_shred_discard_file(file);
     return 1;
@@ -1011,11 +1028,16 @@ static gint rm_shred_remove_basename_matches(RmFile *file, RmFile *headfile) {
 /* also in special cases (eg keep_all_tagged) there may be more than one original,
  * in which case tag them as well
  */
-void rm_shred_group_find_original(RmCfg *cfg, GQueue *files, RmShredGroupStatus status) {
+GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *files, RmLintType lint_type,
+                                     RmDigest *digest) {
     /* iterate over group, unbundling hardlinks and identifying "tagged" originals */
-    for(GList *iter = files->head; iter; iter = iter->next) {
+    for(GSList *iter = files; iter; iter = iter->next) {
         RmFile *file = iter->data;
-        file->is_original = false;
+        file->lint_type = lint_type;
+        file->is_original = FALSE;
+        if(digest) {
+            file->digest = digest;
+        }
 
         if(file->hardlinks.is_head && file->hardlinks.files) {
             /* if group member has a hardlink cluster attached to it then
@@ -1024,47 +1046,46 @@ void rm_shred_group_find_original(RmCfg *cfg, GQueue *files, RmShredGroupStatus 
             GQueue *hardlinks = file->hardlinks.files;
             for(GList *link = hardlinks->head; link; link = link->next) {
                 RmFile *link_file = link->data;
-                // hacky workaround after deleting file->session from RmFile struct:
-                link_file->shred_group =
-                    file->shred_group;  // TODO: make this unnecessary
-                g_queue_push_tail(files, link->data);
+                link_file->lint_type = lint_type;
+                link_file->digest = file->digest;
+                files = g_slist_prepend(files, link_file);
             }
             g_queue_free(hardlinks);
             file->hardlinks.files = NULL;
         }
-        if(status == RM_SHRED_GROUP_FINISHING) {
-            /* identify "tagged" originals: */
-            if((file->is_prefd) && (cfg->keep_all_tagged)) {
-                file->is_original = true;
 
+        if(lint_type == RM_LINT_TYPE_DUPE_CANDIDATE && file->is_prefd &&
+           cfg->keep_all_tagged) {
+            /* may have multiple 'tagged' originals... */
+            file->is_original = true;
 #if _RM_SHRED_DEBUG
-                RM_DEFINE_PATH(file);
-                rm_log_debug_line("tagging %s as original because tagged", file_path);
+            RM_DEFINE_PATH(file);
+            rm_log_debug_line("tagging %s as original because tagged", file_path);
 #endif
-            }
-        } else {
-            file->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
         }
     }
 
     /* sort the unbundled group */
-    g_queue_sort(files, (GCompareDataFunc)rm_file_cmp_orig_criteria, cfg);
+    files =
+        g_slist_sort_with_data(files, (GCompareDataFunc)rm_file_cmp_orig_criteria, cfg);
 
-    RmFile *headfile = files->head->data;
-    if(!headfile->is_original && status == RM_SHRED_GROUP_FINISHING) {
+    RmFile *headfile = files->data;
+    if(lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         headfile->is_original = true;
-
 #if _RM_SHRED_DEBUG
         RM_DEFINE_PATH(headfile);
         rm_log_debug_line("tagging %s as original because it is highest ranked",
                           headfile_path);
 #endif
     }
-    if(cfg->unmatched_basenames && status == RM_SHRED_GROUP_FINISHING) {
+
+    if(cfg->unmatched_basenames && lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         /* remove files which match headfile's basename */
-        rm_util_queue_foreach_remove(files, (RmRFunc)rm_shred_remove_basename_matches,
-                                     files->head->data);
+        rm_log_debug_line("removing basename matches");
+        rm_util_slist_foreach_remove(
+            &files, (RmSListRFunc)rm_shred_remove_basename_matches, files->data);
     }
+    return files;
 }
 
 /////////////////////////////////
@@ -1073,9 +1094,9 @@ void rm_shred_group_find_original(RmCfg *cfg, GQueue *files, RmShredGroupStatus 
 
 static void rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
     RmCfg *cfg = shredder->cfg;
-    RmShredGroup *group = file->shred_group;
+    RmShredNode *node = file->shred_node;
 
-    if(group->has_only_ext_cksums) {
+    if(node->has_only_ext_cksums) {
         /* Cool, we were able to read the checksum from disk */
         file->digest = rm_digest_new(RM_DIGEST_EXT, 0, 0, 0, NEEDS_SHADOW_HASH(cfg));
 
@@ -1090,15 +1111,16 @@ static void rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
             rm_log_warning_line(
                 "Unable to read external checksum from interal cache for %s", file_path);
             file->has_ext_cksum = 0;
-            group->has_only_ext_cksums = 0;
+            node->has_only_ext_cksums = 0;
         }
-    } else if(group->digest_type == RM_DIGEST_PARANOID) {
+    } else if(cfg->checksum_type == RM_DIGEST_PARANOID) {
         file->digest = rm_digest_new(RM_DIGEST_PARANOID, 0, 0, 0, NEEDS_SHADOW_HASH(cfg));
-    } else if(group->digest) {
-        /* pick up the digest-so-far from the RmShredGroup */
-        file->digest = rm_digest_copy(group->digest);
+    } else if(node->digest) {
+        /* pick up the digest-so-far from the RmShredNode */
+        file->digest = rm_digest_copy(node->digest);
     } else {
-        /* this is first generation of RMGroups, so there is no progressive hash yet */
+        /* this is first generation of RmShredNodes, so there is no progressive hash yet
+         */
         file->digest = rm_digest_new(cfg->checksum_type,
                                      cfg->hash_seed1,
                                      cfg->hash_seed2,
@@ -1110,14 +1132,14 @@ static void rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
 /** Callback for RmMDS
  **/
 static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
-    if(rm_session_was_aborted() || file->shred_group->has_only_ext_cksums) {
+    if(rm_session_was_aborted() || file->shred_node->has_only_ext_cksums) {
         if(rm_session_was_aborted()) {
             file->lint_type = RM_LINT_TYPE_INTERRUPTED;
-        } else if(file->shred_group->has_only_ext_cksums) {
+        } else if(file->shred_node->has_only_ext_cksums) {
             rm_shred_reassign_checksum(shredder, file);
         }
         file->shredder_waiting = FALSE;
-        rm_shred_sift(file);
+        rm_shred_reschedule(file);
         return;
     }
 

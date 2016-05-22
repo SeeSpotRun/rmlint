@@ -238,13 +238,13 @@ static void rm_session_output_other_lint(const RmSession *session) {
     }
 }
 
-static void rm_session_output_group(GQueue *files, RmSession *session, bool merge,
+static void rm_session_output_group(GSList *files, RmSession *session, bool merge,
                                     bool count) {
-    RmFile *file = files->head->data;
+    RmFile *file = files->data;
     if(count && file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
         session->counters->dup_group_counter++;
     }
-    for(GList *iter = files->head; iter; iter = iter->next) {
+    for(GSList *iter = files; iter; iter = iter->next) {
         file = iter->data;
 
         if(count && file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
@@ -268,24 +268,24 @@ static void rm_session_output_group(GQueue *files, RmSession *session, bool merg
                file->lint_type != RM_LINT_TYPE_BASENAME_TWIN) {
                 /* TODO: revisit desired output for RM_LINT_TYPE_READ_ERROR and
                  * RM_LINT_TYPE_BASENAME_TWIN */
-                rm_fmt_write(file, session->formats, files->length);
+                rm_fmt_write(file, session->formats, g_slist_length(files));
             }
         }
     }
     if(!session->cfg->cache_file_structs) {
-        RmFile *head = files->head->data;
+        RmFile *head = files->data;
         if(head->digest) {
             rm_digest_free(head->digest);
         }
-        g_queue_free_full(files, (GDestroyNotify)rm_file_destroy);
+        g_slist_free_full(files, (GDestroyNotify)rm_file_destroy);
     } else {
-        g_queue_free(files);
+        g_slist_free(files);
     }
 }
 
 /* threadpipe to receive duplicate files from treemerge
  */
-static void rm_session_merge_pipe(GQueue *files, RmSession *session) {
+static void rm_session_merge_pipe(GSList *files, RmSession *session) {
     rm_session_output_group(files, session, FALSE, FALSE);
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
 }
@@ -316,10 +316,12 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
         }
     }
 
-    GQueue *files = buffer->finished_files;
+    GSList *files = buffer->finished_files;
     if(files) {
-        rm_assert_gentle(files->head && files->head->data);
-        RmFile *head = files->head->data;
+        rm_assert_gentle(files);
+        RmFile *head = files->data;
+        ;
+        rm_assert_gentle(head);
         bool merge = (session->cfg->merge_directories &&
                       head->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE);
         rm_session_output_group(files, session, merge, TRUE);

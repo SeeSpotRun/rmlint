@@ -698,6 +698,21 @@ static int rm_tm_hidden_file(RmFile *file, _UNUSED gpointer user_data) {
     return file->is_hidden;
 }
 
+/* needed because someone rewrote shredder to use GSList instead og GQueue*/
+static void rm_tm_send(GQueue *group, RmTreeMerger *self, gboolean find_original) {
+    GSList *list = NULL;
+    for(GList *iter = group->tail; iter; iter = iter->prev) {
+        list = g_slist_prepend(list, iter->data);
+    }
+    g_queue_free(group);
+
+    if(find_original) {
+        list = rm_shred_group_find_original(self->session->cfg, list,
+                                            RM_LINT_TYPE_DUPE_CANDIDATE, NULL);
+    }
+    rm_util_thread_pool_push(self->results_pipe, list);
+}
+
 static void rm_tm_extract(RmTreeMerger *self) {
     /* Iterate over all directories per hash (which are same therefore) */
     RmCfg *cfg = self->session->cfg;
@@ -775,7 +790,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
         }
 
         if(result_dirs.length >= 2) {
-            g_thread_pool_push(self->results_pipe, file_adaptor_group, NULL);
+            rm_tm_send(file_adaptor_group, self, FALSE);
         }
 
         g_queue_clear(&result_dirs);
@@ -822,9 +837,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
                 self->session->counters->dup_group_counter -= 1;
                 self->session->counters->dup_counter -= file_list->length - 1;
             } else {
-                rm_shred_group_find_original(self->session->cfg, file_list,
-                                             RM_SHRED_GROUP_FINISHING);
-                g_thread_pool_push(self->results_pipe, file_list, NULL);
+                rm_tm_send(file_list, self, TRUE);
             }
         }
     }

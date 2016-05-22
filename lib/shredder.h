@@ -42,7 +42,7 @@ typedef enum RmShredGroupStatus {
 typedef struct RmShredBuffer {
     gint64 delta_bytes;
     gint delta_files;
-    GQueue *finished_files;
+    GSList *finished_files;
 } RmShredBuffer;
 
 /**
@@ -55,15 +55,17 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                   GThreadPool *shredder_pipe, guint total_files);
 
 /**
- * @brief create a new RmShredBuffer with the provided data
- */
-RmShredBuffer *rm_shred_buffer_new(GQueue *files, gint delta_files, gint64 delta_bytes);
-
-/**
  * @brief Find the original file in a group and mark it.
  * TODO: move this out of shredder
  */
-void rm_shred_group_find_original(RmCfg *cfg, GQueue *group, RmShredGroupStatus status);
+GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *group, RmLintType lint_type,
+                                     RmDigest *digest);
+
+/**
+ * @brief create a new RmShredBuffer with the provided data
+ */
+RmShredBuffer *rm_shred_buffer_new(GSList *files, gint delta_files, gint64 delta_bytes);
+
 /**
  * @brief free an RmShredBuffer
  * @note caller retains ownership of buffer->group

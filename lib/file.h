@@ -221,8 +221,8 @@ typedef struct RmFile {
      */
     RmLintType lint_type;
 
-    /* Link to the RmShredGroup that the file currently belongs to */
-    struct RmShredGroup *shred_group;
+    /* Link to the RmShredNode that the file currently belongs to */
+    struct RmShredNode *shred_node;
 
     /* Required for rm_file_equal and for RM_DEFINE_PATH */
     const struct RmCfg *cfg;

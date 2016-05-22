@@ -647,10 +647,9 @@ gboolean rm_digest_equal(RmDigest *a, RmDigest *b) {
         guint bytes = 0;
         while(a_iter && b_iter) {
             if(!rm_buffer_equal(a_iter->data, b_iter->data)) {
-                if(a->paranoid->shadow_hash) {
-                    rm_log_error_line(
-                        "Paranoid digest compare found mismatch - must be hash collision "
-                        "in shadow hash");
+                if(a->paranoid->shadow_hash &&
+                   rm_digest_equal(a->paranoid->shadow_hash, b->paranoid->shadow_hash)) {
+                    rm_log_warning_line("Hash collision in shadow hash (wow!)");
                 }
                 return false;
             }

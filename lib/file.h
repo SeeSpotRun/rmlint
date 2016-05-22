@@ -156,11 +156,6 @@ typedef struct RmFile {
      */
     bool is_hidden : 1;
 
-    /* If false rm_file_destroy will not destroy the digest. This is useful
-     * for sharing the digest of duplicates in a group.
-     */
-    bool free_digest : 1;
-
     /* If true, the checksum of this file was read from the xattrs of the file.
      * It was cached previously by rmlint on the disk.
      */
@@ -168,9 +163,6 @@ typedef struct RmFile {
 
     /* If true, the file will be request to be pre-cached on the next read */
     bool fadvise_requested : 1;
-
-    /* Set to true if rm_shred_process_file() for hash increment */
-    bool shredder_waiting : 1;
 
     /* If this file is the head of a hardlink cluster, the following structure
      * contains the other hardlinked RmFile's.  This is used to avoid

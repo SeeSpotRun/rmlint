@@ -328,13 +328,6 @@ void rm_digest_paranoia_shrink(RmDigest *digest, gsize new_size) {
     digest->bytes = new_size;
 }
 
-void rm_digest_release_buffers(RmDigest *digest) {
-    if(digest->paranoid && digest->paranoid->buffers) {
-        g_slist_free_full(digest->paranoid->buffers, (GDestroyNotify)rm_buffer_free);
-        digest->paranoid->buffers = NULL;
-    }
-}
-
 void rm_digest_free(RmDigest *digest) {
     switch(digest->type) {
     case RM_DIGEST_MD5:
@@ -348,7 +341,7 @@ void rm_digest_free(RmDigest *digest) {
         if(digest->paranoid->shadow_hash) {
             rm_digest_free(digest->paranoid->shadow_hash);
         }
-        rm_digest_release_buffers(digest);
+        g_slist_free_full(digest->paranoid->buffers, (GDestroyNotify)rm_buffer_free);
         g_slice_free(RmParanoid, digest->paranoid);
         break;
     case RM_DIGEST_EXT:
@@ -537,6 +530,18 @@ RmDigest *rm_digest_copy(RmDigest *digest) {
 
         break;
     case RM_DIGEST_PARANOID:
+        /* this is a bit hacky but we basically take over 'digest's
+         * data and reset 'digest' to zero */
+        self = g_slice_new0(RmDigest);
+        self->type = RM_DIGEST_PARANOID;
+        self->paranoid = digest->paranoid;
+        self->bytes = digest->bytes;
+        digest->bytes = 0;
+        digest->paranoid = g_slice_new0(RmParanoid);
+        if(self->paranoid->shadow_hash) {
+            digest->paranoid->shadow_hash = rm_digest_copy(self->paranoid->shadow_hash);
+        }
+        break;
     default:
         rm_assert_gentle_not_reached();
     }
@@ -575,31 +580,66 @@ static gboolean rm_digest_needs_steal(RmDigestType digest_type) {
     }
 }
 
-guint8 *rm_digest_steal(RmDigest *digest) {
-    guint8 *result = g_slice_alloc0(digest->bytes);
-    gsize buflen = digest->bytes;
-
-    if(rm_digest_needs_steal(digest->type)) {
-        /* reading the digest is destructive, so we need to take a copy */
-        RmDigest *copy = rm_digest_copy(digest);
-        g_checksum_get_digest(copy->glib_checksum, result, &buflen);
-        rm_assert_gentle(buflen == digest->bytes);
-        rm_digest_free(copy);
+RmDigestSum *rm_digest_sum(RmDigest *digest) {
+    RmDigestSum *sum = g_slice_new(RmDigestSum);
+    sum->type = digest->type;
+    sum->bytes = digest->bytes;
+    if(digest->type == RM_DIGEST_PARANOID) {
+        sum->buffers = digest->paranoid->buffers;
+        digest->paranoid->buffers = NULL;
+        digest->paranoid->buffer_tail = NULL;
     } else {
-        memcpy(result, digest->checksum, digest->bytes);
+        sum->sum = g_slice_alloc0(digest->bytes);
+        if(rm_digest_needs_steal(digest->type)) {
+            /* reading the digest is destructive, so we need to take a copy */
+            RmDigest *copy = rm_digest_copy(digest);
+            g_checksum_get_digest(copy->glib_checksum, sum->sum, &sum->bytes);
+            rm_assert_gentle(sum->bytes == digest->bytes);
+            rm_digest_free(copy);
+        } else {
+            memcpy(sum->sum, digest->checksum, digest->bytes);
+        }
     }
-    return result;
+    return sum;
+}
+
+void rm_digest_sum_free(RmDigestSum *sum) {
+    if(sum->type == RM_DIGEST_PARANOID) {
+        g_slist_free_full(sum->buffers, (GDestroyNotify)rm_buffer_free);
+    } else {
+        g_slice_free1(sum->bytes, sum->sum);
+    }
+    g_slice_free(RmDigestSum, sum);
+}
+
+gboolean rm_digest_sum_equal(RmDigestSum *a, RmDigestSum *b) {
+    if(a->type != b->type) {
+        return FALSE;
+    }
+    if(a->bytes != b->bytes) {
+        return FALSE;
+    }
+    if(a->type == RM_DIGEST_PARANOID) {
+        /* assumes all buffers have same length */
+        for(GSList *ia = a->buffers, *ib = b->buffers; ia && ib;
+            ia = ia->next, ib = ib->next) {
+            if(!rm_buffer_equal(ia->data, ib->data)) {
+                return FALSE;
+            }
+        }
+        return TRUE;
+    } else {
+        return !memcmp(a->sum, b->sum, a->bytes);
+    }
 }
 
 guint rm_digest_hash(RmDigest *digest) {
-    guint8 *buf = NULL;
-    gsize bytes = 0;
+    RmDigestSum *sum = NULL;
     guint hash = 0;
 
     if(digest->type == RM_DIGEST_PARANOID) {
         if(digest->paranoid->shadow_hash) {
-            buf = rm_digest_steal(digest->paranoid->shadow_hash);
-            bytes = digest->paranoid->shadow_hash->bytes;
+            sum = rm_digest_sum(digest->paranoid->shadow_hash);
         } else {
             /* steal the first few bytes of the first buffer */
             if(digest->paranoid->buffers) {
@@ -611,14 +651,13 @@ guint rm_digest_hash(RmDigest *digest) {
             }
         }
     } else {
-        buf = rm_digest_steal(digest);
-        bytes = digest->bytes;
+        sum = rm_digest_sum(digest);
     }
 
-    if(buf != NULL) {
-        rm_assert_gentle(bytes >= sizeof(guint));
-        hash = *(guint *)buf;
-        g_slice_free1(bytes, buf);
+    if(sum != NULL) {
+        rm_assert_gentle(sum->bytes >= sizeof(guint));
+        hash = *(guint *)sum->sum;
+        rm_digest_sum_free(sum);
     }
     return hash;
 }
@@ -661,20 +700,13 @@ gboolean rm_digest_equal(RmDigest *a, RmDigest *b) {
         return (!a_iter && !b_iter && bytes == a->bytes);
 
     } else if(rm_digest_needs_steal(a->type)) {
-        guint8 *buf_a = rm_digest_steal(a);
-        guint8 *buf_b = rm_digest_steal(b);
+        RmDigestSum *sum_a = rm_digest_sum(a);
+        RmDigestSum *sum_b = rm_digest_sum(b);
 
-        gboolean result;
+        gboolean result = rm_digest_sum_equal(sum_a, sum_b);
 
-        if(a->bytes != b->bytes) {
-            result = false;
-        } else {
-            result = !memcmp(buf_a, buf_b, MIN(a->bytes, b->bytes));
-        }
-
-        g_slice_free1(a->bytes, buf_a);
-        g_slice_free1(b->bytes, buf_b);
-
+        rm_digest_sum_free(sum_a);
+        rm_digest_sum_free(sum_b);
         return result;
     } else {
         return !memcmp(a->checksum, b->checksum, MIN(a->bytes, b->bytes));
@@ -682,26 +714,26 @@ gboolean rm_digest_equal(RmDigest *a, RmDigest *b) {
 }
 
 int rm_digest_hexstring(RmDigest *digest, char *buffer) {
-    static const char *hex = "0123456789abcdef";
-    guint8 *input = NULL;
-    gsize bytes = 0;
     if(digest == NULL) {
         return 0;
     }
 
+    static const char *hex = "0123456789abcdef";
+    RmDigestSum *sum = NULL;
+
     if(digest->type == RM_DIGEST_PARANOID) {
         if(digest->paranoid->shadow_hash) {
-            input = rm_digest_steal(digest->paranoid->shadow_hash);
-            bytes = digest->paranoid->shadow_hash->bytes;
+            sum = rm_digest_sum(digest->paranoid->shadow_hash);
+        } else {
+            return 0;
         }
     } else {
-        input = rm_digest_steal(digest);
-        bytes = digest->bytes;
+        sum = rm_digest_sum(digest);
     }
-
-    for(gsize i = 0; i < bytes; ++i) {
-        buffer[0] = hex[input[i] / 16];
-        buffer[1] = hex[input[i] % 16];
+    int bytes = sum->bytes;
+    for(int i = 0; i < bytes; ++i) {
+        buffer[0] = hex[sum->sum[i] / 16];
+        buffer[1] = hex[sum->sum[i] % 16];
 
         if(i == bytes - 1) {
             buffer[2] = '\0';
@@ -710,7 +742,7 @@ int rm_digest_hexstring(RmDigest *digest, char *buffer) {
         buffer += 2;
     }
 
-    g_slice_free1(bytes, input);
+    rm_digest_sum_free(sum);
     return bytes * 2 + 1;
 }
 

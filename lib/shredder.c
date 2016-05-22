@@ -384,31 +384,29 @@ typedef struct RmShredNode {
     gboolean final : 1;
 
     /* checksum of first file to enter the group */
-    RmDigest *digest;
+    RmDigestSum *sum;
 
 } RmShredNode;
 
 /** initialises an RmShredNode based on file;
  * note: assumes node is already memset to all zeros
  **/
-static void rm_shred_node_init(RmShredNode *node, RmFile *file) {
+static void rm_shred_node_init(RmShredNode *node, RmFile *file, RmDigestSum *sum) {
     if(file->shred_node) {
         /* should be true unless this is first node of tree */
         node->parent = file->shred_node;
         node->tree = node->parent->tree;
-        rm_assert_gentle(file->digest);
-        node->digest = file->digest;
-        file->digest = NULL;
     }
     node->final = (file->hash_offset == file->file_size);
+    node->sum = sum;
 }
 
 /** allocate and initialise a new RmShredNode based on file;
  * takes ownership of file's digest.
  **/
-static RmShredNode *rm_shred_node_new(RmFile *file) {
+static RmShredNode *rm_shred_node_new(RmFile *file, RmDigestSum *sum) {
     RmShredNode *self = g_slice_new0(RmShredNode);
-    rm_shred_node_init(self, file);
+    rm_shred_node_init(self, file, sum);
 
     return self;
 }
@@ -421,8 +419,8 @@ static void rm_shred_node_free(RmShredNode *node) {
     /* don't free top-level node; it is embedded in RmShredTree */
     rm_assert_gentle((gpointer)node != (gpointer)node->tree);
 
-    if(node->digest) {
-        rm_digest_free(node->digest);
+    if(node->sum) {
+        rm_digest_sum_free(node->sum);
     }
     g_slice_free(RmShredNode, node);
 }
@@ -454,7 +452,7 @@ static RmShredTree *rm_shred_tree_new(RmShredTag *shredder, RmFile *file) {
     RmShredTree *tree = g_new0(RmShredTree, 1);
 
     tree->shredder = shredder;
-    rm_shred_node_init(&tree->head, file);
+    rm_shred_node_init(&tree->head, file, NULL);
     tree->head.tree = tree;
 
     g_mutex_init(&tree->lock);
@@ -638,8 +636,9 @@ static void rm_shred_node_output(RmShredNode *node) {
         lint_type = RM_LINT_TYPE_UNIQUE_FILE;
     }
 
-    if(node->digest && node->digest->type == RM_DIGEST_PARANOID) {
-        rm_digest_release_buffers(node->digest);
+    if(node->sum) {
+        rm_digest_sum_free(node->sum);
+        node->sum = NULL;
     }
 
     /* find the original(s) (note this also unbundles hardlinks and sorts
@@ -647,9 +646,8 @@ static void rm_shred_node_output(RmShredNode *node) {
      * to their (shared) digest
      */
     RmShredTag *shredder = node->tree->shredder;
-    node->held_files = rm_shred_group_find_original(shredder->cfg, node->held_files,
-                                                    lint_type, node->digest);
-    node->digest = NULL;
+    node->held_files =
+        rm_shred_group_find_original(shredder->cfg, node->held_files, lint_type);
 
     /* send files to session for output and file freeing */
     rm_shred_send(shredder, node->held_files, 0, 0);
@@ -672,11 +670,6 @@ static gint rm_shred_num_files(RmFile *file) {
  **/
 static void rm_shred_node_add_file(RmShredNode *node, RmFile *file) {
     file->shred_node = node;
-
-    if(file->digest) {
-        rm_digest_free(file->digest);
-        file->digest = NULL;
-    }
 
     /* logic for cfg->unmatched_basenames option */
     RmCfg *cfg = node->tree->shredder->cfg;
@@ -831,15 +824,17 @@ static void rm_shred_reschedule(RmFile *file) {
             /* find right node to reinsert into tree */
             rm_assert_gentle(file->digest);
             RmShredNode *child = NULL;
+            RmDigestSum *sum = rm_digest_sum(file->digest);
             for(GSList *iter = current->children; iter; iter = iter->next) {
                 RmShredNode *candidate = iter->data;
-                if(rm_digest_equal(candidate->digest, file->digest)) {
+                if(rm_digest_sum_equal(candidate->sum, sum)) {
                     child = candidate;
+                    rm_digest_sum_free(sum);
                     break;
                 }
             }
             if(!child) {
-                child = rm_shred_node_new(file);
+                child = rm_shred_node_new(file, sum);
                 current->children = g_slist_prepend(current->children, child);
             }
             /* add file to child node, or maybe send it to hashing queue */
@@ -932,11 +927,6 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredTree *tree) {
         char *ext_cksum = rm_xattr_read_hash(shredder->cfg, file);
         if(ext_cksum != NULL) {
             file->folder->data = ext_cksum;
-        }
-    }
-
-    if(HAS_CACHE(shredder)) {
-        if(rm_trie_search(&cfg->file_trie, file_path)) {
             file->has_ext_cksum = TRUE;
         }
     }
@@ -1028,16 +1018,12 @@ static gint rm_shred_remove_basename_matches(RmFile *file, _UNUSED RmFile *prev,
 /* also in special cases (eg keep_all_tagged) there may be more than one original,
  * in which case tag them as well
  */
-GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *files, RmLintType lint_type,
-                                     RmDigest *digest) {
+GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *files, RmLintType lint_type) {
     /* iterate over group, unbundling hardlinks and identifying "tagged" originals */
     for(GSList *iter = files; iter; iter = iter->next) {
         RmFile *file = iter->data;
         file->lint_type = lint_type;
         file->is_original = FALSE;
-        if(digest) {
-            file->digest = digest;
-        }
 
         if(file->hardlinks.is_head && file->hardlinks.files) {
             /* if group member has a hardlink cluster attached to it then
@@ -1092,53 +1078,11 @@ GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *files, RmLintType lint_
 //    ACTUAL IMPLEMENTATION    //
 /////////////////////////////////
 
-static void rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
-    RmCfg *cfg = shredder->cfg;
-    RmShredNode *node = file->shred_node;
-
-    if(node->has_only_ext_cksums) {
-        /* Cool, we were able to read the checksum from disk */
-        file->digest = rm_digest_new(RM_DIGEST_EXT, 0, 0, 0, NEEDS_SHADOW_HASH(cfg));
-
-        RM_DEFINE_PATH(file);
-
-        char *hexstring = file->folder->data;
-
-        if(hexstring != NULL) {
-            rm_digest_update(file->digest, (unsigned char *)hexstring, strlen(hexstring));
-            rm_log_debug_line("%s=%s was read from cache.", hexstring, file_path);
-        } else {
-            rm_log_warning_line(
-                "Unable to read external checksum from interal cache for %s", file_path);
-            file->has_ext_cksum = 0;
-            node->has_only_ext_cksums = 0;
-        }
-    } else if(cfg->checksum_type == RM_DIGEST_PARANOID) {
-        file->digest = rm_digest_new(RM_DIGEST_PARANOID, 0, 0, 0, NEEDS_SHADOW_HASH(cfg));
-    } else if(node->digest) {
-        /* pick up the digest-so-far from the RmShredNode */
-        file->digest = rm_digest_copy(node->digest);
-    } else {
-        /* this is first generation of RmShredNodes, so there is no progressive hash yet
-         */
-        file->digest = rm_digest_new(cfg->checksum_type,
-                                     cfg->hash_seed1,
-                                     cfg->hash_seed2,
-                                     0,
-                                     NEEDS_SHADOW_HASH(cfg));
-    }
-}
-
 /** Callback for RmMDS
  **/
 static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
-    if(rm_session_was_aborted() || file->shred_node->has_only_ext_cksums) {
-        if(rm_session_was_aborted()) {
-            file->lint_type = RM_LINT_TYPE_INTERRUPTED;
-        } else if(file->shred_node->has_only_ext_cksums) {
-            rm_shred_reassign_checksum(shredder, file);
-        }
-        file->shredder_waiting = FALSE;
+    if(rm_session_was_aborted()) {
+        file->lint_type = RM_LINT_TYPE_INTERRUPTED;
         rm_shred_reschedule(file);
         return;
     }
@@ -1146,8 +1090,14 @@ static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     RM_DEFINE_PATH(file);
 
     if(!file->digest) {
-        rm_shred_reassign_checksum(shredder, file);
+        RmCfg *cfg = shredder->cfg;
+        file->digest = rm_digest_new(cfg->checksum_type,
+                                     cfg->hash_seed1,
+                                     cfg->hash_seed2,
+                                     0,
+                                     NEEDS_SHADOW_HASH(cfg));
     }
+
     /* hash the next increment of the file */
     RmOff bytes_to_read = rm_shred_get_read_size(file, shredder);
 

@@ -88,6 +88,17 @@ typedef struct RmDigest {
     gsize bytes;
 } RmDigest;
 
+typedef struct RmDigestSum {
+    /* digest type */
+    RmDigestType type;
+    /* digest size in bytes */
+    gsize bytes;
+    union {
+        guint8 *sum;
+        GSList *buffers;
+    };
+} RmDigestSum;
+
 /////////// RmBufferPool and RmBuffer ////////////////
 
 typedef struct RmBufferPool {
@@ -201,8 +212,6 @@ void rm_digest_buffered_update(RmBuffer *buffer);
 /**
  * @brief Convert the checksum to a hexstring (like `md5sum`)
  *
- * rm_digest_update is not allowed to be called after finalizing.
- *
  * If the type is RM_DIGEST_PARANOID, this will return the hexstring
  * of the shadow digest built in the background.
  *
@@ -216,16 +225,36 @@ void rm_digest_buffered_update(RmBuffer *buffer);
 int rm_digest_hexstring(RmDigest *digest, char *buffer);
 
 /**
- * @brief steal digest result into allocated memory slice.
+ * @brief copy digest result into allocated RmDigestSum.
  *
  * @param digest a pointer to a RmDigest
  *
- * Steal the internal buffer of the digest. For RM_DIGEST_PARANOID,
- * this will be the actual file data.
+ * Copy the current digest result into an RmDigestSum;
+ * For digests other than RM_DIGEST_PARANOID, does not
+ * modify RmDigest *digest.
+ * For RM_DIGEST_PARANOID, steals all of digest's RmBuffers
  *
- * @return pointer to result (note: result length will = digest->bytes)
+ * @return pointer to result
  */
-guint8 *rm_digest_steal(RmDigest *digest);
+RmDigestSum *rm_digest_sum(RmDigest *digest);
+
+/**
+ * @brief compare two RmDigestSums.
+ *
+ * @param a a pointer to a RmDigestSum
+ * @param b a pointer to another RmDigestSum.
+ *
+ * The RmDigestSums are compared byte for byte, even
+ * for RM_DIGEST_PARANOID.
+ *
+ * @return true if RmDigestSums match
+ */
+gboolean rm_digest_sum_equal(RmDigestSum *a, RmDigestSum *b);
+
+/**
+ * @brief free an RmDigestSum
+ **/
+void rm_digest_sum_free(RmDigestSum *sum);
 
 /**
  * @brief Hash a Digest, suitable for GHashTable.
@@ -271,11 +300,6 @@ int rm_digest_get_bytes(RmDigest *self);
  * This is mainly useful for using an adjusted buffer for symlinks.
  */
 void rm_digest_paranoia_shrink(RmDigest *digest, gsize new_size);
-
-/**
- * Release any kept (paranoid) buffers.
- */
-void rm_digest_release_buffers(RmDigest *digest);
 
 /**
  * @brief Return the size of an individual buffer.

@@ -297,7 +297,10 @@ static RmDirectory *rm_directory_new(char *dirname) {
 }
 
 static void rm_directory_free(RmDirectory *self) {
-    rm_digest_free(self->digest);
+    if(self->digest) {
+        rm_digest_free(self->digest);
+        self->digest = NULL;
+    }
     g_hash_table_unref(self->hash_set);
     g_queue_clear(&self->known_files);
     g_queue_clear(&self->children);
@@ -330,7 +333,6 @@ static void rm_directory_to_file(RmTreeMerger *merger, const RmDirectory *self,
     rm_file_set_path(file, self->dirname);
 
     file->lint_type = RM_LINT_TYPE_DUPE_DIR_CANDIDATE;
-    file->digest = self->digest;
 
     /* Set these to invalid for now */
     file->mtime = self->metadata.dir_mtime;
@@ -396,26 +398,24 @@ static int rm_directory_add(RmDirectory *directory, RmFile *file) {
     rm_assert_gentle(file->digest);
     rm_assert_gentle(directory);
 
-    guint8 *file_digest = NULL;
-    RmOff digest_bytes = 0;
+    RmDigestSum *sum = NULL;
 
     if(file->digest->type == RM_DIGEST_PARANOID) {
-        file_digest = rm_digest_steal(file->digest->paranoid->shadow_hash);
-        digest_bytes = file->digest->paranoid->shadow_hash->bytes;
+        rm_assert_gentle(file->digest->paranoid->shadow_hash);
+        sum = rm_digest_sum(file->digest->paranoid->shadow_hash);
     } else {
-        file_digest = rm_digest_steal(file->digest);
-        digest_bytes = file->digest->bytes;
+        sum = rm_digest_sum(file->digest);
     }
 
     /* + and not XOR, since ^ would yield 0 for same hashes always. No matter
      * which hashes. Also this would be confusing. For me and for debuggers.
      */
-    rm_digest_update(directory->digest, file_digest, digest_bytes);
+    rm_digest_update(directory->digest, sum->sum, sum->bytes);
 
     /* The file value is not really used, but we need some non-null value */
     g_hash_table_add(directory->hash_set, file->digest);
 
-    g_slice_free1(digest_bytes, file_digest);
+    rm_digest_sum_free(sum);
 
     if(file->hardlinks.is_head && file->hardlinks.files) {
         new_dupes = 1 + g_queue_get_length(file->hardlinks.files);
@@ -458,9 +458,9 @@ static void rm_directory_add_subdir(RmDirectory *parent, RmDirectory *subdir) {
     }
 
     /* Inherit the child's checksum */
-    unsigned char *subdir_cksum = rm_digest_steal(subdir->digest);
-    rm_digest_update(parent->digest, subdir_cksum, subdir->digest->bytes);
-    g_slice_free1(subdir->digest->bytes, subdir_cksum);
+    RmDigestSum *sum = rm_digest_sum(subdir->digest);
+    rm_digest_update(parent->digest, sum->sum, sum->bytes);
+    rm_digest_sum_free(sum);
 
     subdir->was_merged = true;
 }
@@ -503,8 +503,6 @@ void rm_tm_destroy(RmTreeMerger *self) {
     g_hash_table_unref(self->result_table);
     g_hash_table_unref(self->file_groups);
 
-    GList *digest_keys = g_hash_table_get_keys(self->known_hashs);
-    g_list_free_full(digest_keys, (GDestroyNotify)rm_digest_free);
     g_hash_table_unref(self->known_hashs);
 
     g_queue_clear(&self->valid_dirs);
@@ -515,7 +513,7 @@ void rm_tm_destroy(RmTreeMerger *self) {
 
     rm_trie_destroy(&self->dir_tree);
     rm_trie_destroy(&self->count_tree);
-    g_queue_free_full(self->free_list, (GDestroyNotify)rm_file_destroy);
+    g_queue_free(self->free_list);
 
     g_slice_free(RmTreeMerger, self);
 }
@@ -708,7 +706,7 @@ static void rm_tm_send(GQueue *group, RmTreeMerger *self, gboolean find_original
 
     if(find_original) {
         list = rm_shred_group_find_original(self->session->cfg, list,
-                                            RM_LINT_TYPE_DUPE_CANDIDATE, NULL);
+                                            RM_LINT_TYPE_DUPE_CANDIDATE);
     }
     rm_util_thread_pool_push(self->results_pipe, list);
 }

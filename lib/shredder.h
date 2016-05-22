@@ -58,8 +58,7 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
  * @brief Find the original file in a group and mark it.
  * TODO: move this out of shredder
  */
-GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *group, RmLintType lint_type,
-                                     RmDigest *digest);
+GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *group, RmLintType lint_type);
 
 /**
  * @brief create a new RmShredBuffer with the provided data

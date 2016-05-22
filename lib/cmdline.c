@@ -755,7 +755,7 @@ static gboolean rm_cmd_parse_progress(_UNUSED const char *option_name,
     cmd->cfg->progress_enabled = true;
 
     /* Set verbosity to minimal */
-    cmd->cfg->verbosity = G_LOG_LEVEL_ERROR;
+    cmd->cfg->verbosity = G_LOG_LEVEL_CRITICAL;
     return true;
 }
 

@@ -411,6 +411,13 @@ static RmShredNode *rm_shred_node_new(RmFile *file, RmDigestSum *sum) {
     return self;
 }
 
+static inline void rm_shred_node_free_sum(RmShredNode *node) {
+    if(node->sum) {
+        rm_digest_sum_free(node->sum);
+        node->sum = NULL;
+    }
+}
+
 /** Free an RmShredNode
  **/
 static void rm_shred_node_free(RmShredNode *node) {
@@ -418,10 +425,8 @@ static void rm_shred_node_free(RmShredNode *node) {
     rm_assert_gentle(!node->children);
     /* don't free top-level node; it is embedded in RmShredTree */
     rm_assert_gentle((gpointer)node != (gpointer)node->tree);
+    rm_shred_node_free_sum(node);
 
-    if(node->sum) {
-        rm_digest_sum_free(node->sum);
-    }
     g_slice_free(RmShredNode, node);
 }
 
@@ -637,10 +642,7 @@ static void rm_shred_node_output(RmShredNode *node) {
         lint_type = RM_LINT_TYPE_UNIQUE_FILE;
     }
 
-    if(node->sum) {
-        rm_digest_sum_free(node->sum);
-        node->sum = NULL;
-    }
+    rm_shred_node_free_sum(node);
 
     /* find the original(s) (note this also unbundles hardlinks and sorts
      * the group from highest ranked to lowest ranked, and points the files
@@ -755,6 +757,9 @@ static gboolean rm_shred_node_finished(RmShredNode *node, _UNUSED RmShredNode *p
         /* still waiting for incoming hashes */
         return FALSE;
     }
+
+    /* no pending files so checksum not needed */
+    rm_shred_node_free_sum(node);
 
     if(node->held_files) {
         rm_assert_gentle(!node->children);

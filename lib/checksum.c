@@ -341,7 +341,7 @@ void rm_digest_free(RmDigest *digest) {
         if(digest->paranoid->shadow_hash) {
             rm_digest_free(digest->paranoid->shadow_hash);
         }
-        g_slist_free_full(digest->paranoid->buffers, (GDestroyNotify)rm_buffer_free);
+        g_slist_free_full(digest->paranoid->buffers, (GDestroyNotify)rm_buffer_release);
         g_slice_free(RmParanoid, digest->paranoid);
         break;
     case RM_DIGEST_EXT:
@@ -605,7 +605,7 @@ RmDigestSum *rm_digest_sum(RmDigest *digest) {
 
 void rm_digest_sum_free(RmDigestSum *sum) {
     if(sum->type == RM_DIGEST_PARANOID) {
-        g_slist_free_full(sum->buffers, (GDestroyNotify)rm_buffer_free);
+        g_slist_free_full(sum->buffers, (GDestroyNotify)rm_buffer_release);
     } else {
         g_slice_free1(sum->bytes, sum->sum);
     }

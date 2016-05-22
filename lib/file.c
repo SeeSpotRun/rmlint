@@ -110,7 +110,7 @@ void rm_file_destroy(RmFile *file) {
         g_free(file->folder->data);
     }
 
-    if(file->free_digest) {
+    if(file->digest && !file->hardlinks.hardlink_head) {
         rm_digest_free(file->digest);
     }
 

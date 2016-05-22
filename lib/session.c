@@ -273,10 +273,6 @@ static void rm_session_output_group(GSList *files, RmSession *session, bool merg
         }
     }
     if(!session->cfg->cache_file_structs) {
-        RmFile *head = files->data;
-        if(head->digest) {
-            rm_digest_free(head->digest);
-        }
         g_slist_free_full(files, (GDestroyNotify)rm_file_destroy);
     } else {
         g_slist_free(files);

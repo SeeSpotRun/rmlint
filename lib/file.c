@@ -23,15 +23,15 @@
 */
 
 #include "file.h"
-#include "utilities.h"
 #include "session.h"
+#include "utilities.h"
 
-#include <string.h>
-#include <unistd.h>
-#include <sys/file.h>
-#include <string.h>
-#include <stdio.h>
 #include <ctype.h>
+#include <stdio.h>
+#include <string.h>
+#include <string.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
                     ino_t inode, time_t mtime, RmLintType type, bool is_ppath,

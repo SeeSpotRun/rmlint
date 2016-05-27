@@ -27,8 +27,8 @@
 
 #include <stdio.h>
 
-#include "pathtricia.h"
 #include "checksum.h"
+#include "pathtricia.h"
 #include "utilities.h"
 
 /* Storage struct for all options settable in cmdline. */

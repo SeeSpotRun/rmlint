@@ -23,21 +23,21 @@
 *
 **/
 
-#include <string.h>
 #include <stdbool.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "config.h"
-#include "session.h"
 #include "formats.h"
-#include "traverse.h"
+#include "md-scheduler.h"
+#include "preprocess.h"
 #include "preprocess.h"
 #include "replay.h"
-#include "md-scheduler.h"
-#include "treemerge.h"
-#include "traverse.h"
-#include "preprocess.h"
+#include "session.h"
 #include "shredder.h"
+#include "traverse.h"
+#include "traverse.h"
+#include "treemerge.h"
 #include "utilities.h"
 #include "xattr.h"
 

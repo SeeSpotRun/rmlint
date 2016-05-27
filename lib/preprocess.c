@@ -22,16 +22,16 @@
  * Hosted on http://github.com/sahib/rmlint
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "preprocess.h"
-#include "utilities.h"
-#include "formats.h"
 #include "cmdline.h"
+#include "formats.h"
+#include "preprocess.h"
 #include "shredder.h"
+#include "utilities.h"
 
 typedef struct RmPPSession {
     const RmCfg *cfg;

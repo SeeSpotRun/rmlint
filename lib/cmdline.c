@@ -23,12 +23,12 @@
  *
  */
 
-#include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <string.h>
 
-#include <search.h>
 #include <glib/gstdio.h>
+#include <search.h>
 
 #include "formats.h"
 

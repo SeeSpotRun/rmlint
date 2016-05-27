@@ -24,18 +24,18 @@
  */
 
 /* Internal headers */
-#include "config.h"
 #include "replay.h"
-#include "session.h"
-#include "formats.h"
+#include "config.h"
 #include "file.h"
+#include "formats.h"
 #include "preprocess.h"
+#include "session.h"
 #include "shredder.h"
 
 /* External libraries */
-#include <string.h>
 #include <glib.h>
 #include <glib/gstdio.h>
+#include <string.h>
 
 #if HAVE_JSON_GLIB
 #include <json-glib/json-glib.h>

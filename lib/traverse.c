@@ -23,11 +23,11 @@
  *
  */
 
-#include <string.h>
 #include <glib.h>
+#include <string.h>
 
-#include "traverse.h"
 #include "fts/fts.h"
+#include "traverse.h"
 
 //////////////////////
 // TRAVERSE SESSION //
@@ -210,7 +210,7 @@ static void rm_traverse_directory(RmTravBuffer *buffer, RmTravSession *traverser
     /* Initialize ftsp */
     int fts_flags = FTS_PHYSICAL | FTS_COMFOLLOW | FTS_NOCHDIR;
 
-    FTS *ftsp = fts_open((char * [2]){buffer->path, NULL}, fts_flags, NULL);
+    FTS *ftsp = fts_open((char *[2]){buffer->path, NULL}, fts_flags, NULL);
 
     if(ftsp == NULL) {
         rm_log_error_line("fts_open() == NULL");

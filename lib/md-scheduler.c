@@ -197,8 +197,12 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
 
         /* sort and merge task lists */
         if(device->unsorted_tasks) {
-            device->unsorted_tasks = g_slist_sort_with_data(device->unsorted_tasks, (GCompareDataFunc)rm_mds_compare, (RmMDSSortFunc)mds->prioritiser);
-            device->sorted_tasks = rm_util_slist_merge_sorted(device->sorted_tasks, device->unsorted_tasks, (GCompareDataFunc)mds->prioritiser, NULL);
+            device->unsorted_tasks = g_slist_sort_with_data(
+                device->unsorted_tasks, (GCompareDataFunc)rm_mds_compare,
+                (RmMDSSortFunc)mds->prioritiser);
+            device->sorted_tasks =
+                rm_util_slist_merge_sorted(device->sorted_tasks, device->unsorted_tasks,
+                                           (GCompareDataFunc)mds->prioritiser, NULL);
             device->unsorted_tasks = NULL;
         }
     }
@@ -395,7 +399,7 @@ void rm_mds_push_task(RmMDSDevice *device, dev_t dev, gint64 offset, const char 
         } else {
             device->sorted_tasks = g_slist_prepend(device->sorted_tasks, task);
         }
-        if (device->waiting) {
+        if(device->waiting) {
             g_cond_signal(&device->cond);
         }
     }

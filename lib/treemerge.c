@@ -58,14 +58,14 @@
 #include <glib.h>
 #include <string.h>
 
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
-#include "treemerge.h"
-#include "shredder.h"
-#include "preprocess.h"
 #include "formats.h"
 #include "pathtricia.h"
+#include "preprocess.h"
+#include "shredder.h"
+#include "treemerge.h"
 
 #include "fts/fts.h"
 

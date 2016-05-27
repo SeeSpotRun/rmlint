@@ -1010,7 +1010,6 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredGroup *group) {
                                                                  ? file->path_index + 1
                                                                  : file->dev);
     rm_mds_device_ref(file->disk, 1);
-    rm_shred_send(shredder, NULL, 1, (gint64)file->file_size - file->hash_offset);
 
     rm_assert_gentle(group);
     rm_shred_group_push_file(group, file);
@@ -1059,6 +1058,7 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     /* check paranoid mem avail - hold back groups if out of mem */
     g_mutex_lock(&shredder->hash_mem_mtx);
     {
+        rm_log_debug_line("mem: %li", shredder->paranoid_mem_alloc);
         while(shredder->paranoid_mem_alloc <= 0) {
             rm_log_debug_line("shredder: waiting for mem");
             if(!shredder->mds_started) {

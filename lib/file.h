@@ -219,7 +219,8 @@ typedef struct RmFile {
     /* Required for rm_file_equal and for RM_DEFINE_PATH */
     const struct RmCfg *cfg;
 
-    struct RmSignal *signal;
+    /* whether file has hashed more than one increment past its siblings */
+    bool shred_overshot : 1;
 
     /* Caching bitmasks to ensure each file is only matched once
      * for every GRegex combination.

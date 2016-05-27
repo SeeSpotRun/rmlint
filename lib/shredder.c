@@ -482,10 +482,11 @@ static void rm_shred_tree_free(RmShredTree *tree) {
 //////////////////////////////////
 
 /* Compute optimal size for next hash increment */
-static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
-    rm_assert_gentle(file->hash_offset < file->file_size);
+static gint32 rm_shred_get_read_size(RmFile *file, RmOff read_offset,
+                                     RmShredTag *shredder) {
+    rm_assert_gentle(read_offset < file->file_size);
 
-    RmOff target = file->hash_offset * SHRED_ACCELERATION + shredder->first_increment;
+    RmOff target = read_offset * SHRED_ACCELERATION + shredder->first_increment;
     /* eg for first_increment == 10 and SHRED_ACCELERATION == 4
      *   -> 10,  50,  210,  850...
      *    (+10)(+40)(+160)(+640)...
@@ -494,7 +495,7 @@ static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
     /* don't over-shoot file */
     target = MIN(target, file->file_size);
 
-    RmOff result = target - file->hash_offset;
+    RmOff result = target - read_offset;
 
     /* don't exceed max increment */
     result = MIN(result, shredder->max_increment);
@@ -668,7 +669,7 @@ static gint rm_shred_num_files(RmFile *file) {
  * hashing, in which case it is added the the hashing queue instead.
  * call with tree node->tree locked
  **/
-static void rm_shred_node_add_file(RmShredNode *node, RmFile *file) {
+static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, gboolean continuing) {
     file->shred_node = node;
 
     /* logic for cfg->unmatched_basenames option */
@@ -709,6 +710,7 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file) {
 
     /* check whether to send for further hashing, or store in the node */
     if(rm_shred_node_qualifies(node) && !node->final) {
+        file->shred_overshot = FALSE;
         /* push any held files to the md-scheduler for hashing */
         while(node->held_files) {
             node->num_pending++;
@@ -718,7 +720,14 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file) {
         }
         /* push the new arrival too */
         node->num_pending++;
-        rm_shred_push_queue(file);
+        if(!continuing) {
+            rm_shred_push_queue(file);
+        }
+    } else if(continuing) {
+        /* file is still hashing */
+        rm_assert_gentle(!node->final);
+        file->shred_overshot = TRUE;
+        node->num_pending++;
     } else {
         /* hold onto the file */
         node->held_files = g_slist_prepend(node->held_files, file);
@@ -803,7 +812,7 @@ static gboolean rm_shred_node_prune(RmShredNode *node) {
  * Note rm_shred_reschedule also does any pruning of branches that die as
  * a result.  If the last branch is removed then the tree will be freed.
  **/
-static void rm_shred_reschedule(RmFile *file) {
+static void rm_shred_reschedule(RmFile *file, gboolean continuing) {
     rm_assert_gentle(file);
     RmShredNode *current = file->shred_node;
     rm_assert_gentle(current);
@@ -838,7 +847,7 @@ static void rm_shred_reschedule(RmFile *file) {
                 current->children = g_slist_prepend(current->children, child);
             }
             /* add file to child node, or maybe send it to hashing queue */
-            rm_shred_node_add_file(child, file);
+            rm_shred_node_add_file(child, file, continuing);
         }
 
         /* check if current group (and its children) have finished; if yes
@@ -862,11 +871,10 @@ static void rm_shred_reschedule(RmFile *file) {
  * */
 static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
                                    _UNUSED RmShredTag *shredder, RmFile *file,
-                                   _UNUSED gpointer message, _UNUSED gboolean is_last) {
-    if(!file->digest) {
-        file->digest = digest;
-    }
+                                   guint bytes_read, gboolean is_last) {
     rm_assert_gentle(file->digest == digest);
+    file->hash_offset += bytes_read;
+    rm_assert_gentle(file->hash_offset <= file->file_size);
 
     if(file->lint_type != RM_LINT_TYPE_READ_ERROR &&
        shredder->cfg->write_cksum_to_xattr && file->has_ext_cksum == false) {
@@ -874,7 +882,7 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
         rm_xattr_write_hash(shredder->cfg, file);
     }
 
-    rm_shred_reschedule(file);
+    rm_shred_reschedule(file, !is_last);
 }
 
 ////////////////////////////////////
@@ -932,7 +940,7 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredTree *tree) {
         }
     }
 
-    rm_shred_node_add_file(&tree->head, file);
+    rm_shred_node_add_file(&tree->head, file, FALSE);
     if(cfg->checksum_type == RM_DIGEST_PARANOID) {
         tree->paranoid_mem_alloc += MIN(file->file_size, shredder->max_increment);
     }
@@ -1084,7 +1092,7 @@ GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *files, RmLintType lint_
 static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     if(rm_session_was_aborted()) {
         file->lint_type = RM_LINT_TYPE_INTERRUPTED;
-        rm_shred_reschedule(file);
+        rm_shred_reschedule(file, FALSE);
         return;
     }
 
@@ -1099,26 +1107,43 @@ static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
                                      NEEDS_SHADOW_HASH(cfg));
     }
 
-    /* hash the next increment of the file */
-    RmOff bytes_to_read = rm_shred_get_read_size(file, shredder);
-
     RmHasherTask *task = rm_hasher_task_new(shredder->hasher, file->digest, file);
-    if(!rm_hasher_task_hash(task, file_path, file->hash_offset, bytes_to_read,
-                            file->is_symlink)) {
-        /* rm_hasher_start_increment failed somewhere */
-        file->lint_type = RM_LINT_TYPE_READ_ERROR;
-    }
-    file->hash_offset += bytes_to_read;
 
-    /* Update totals for file, device and session*/
-    if(file->is_symlink) {
-        rm_shred_send(shredder, NULL, 0, -(gint64)file->file_size);
-    } else {
-        rm_shred_send(shredder, NULL, 0, -(gint64)bytes_to_read);
-    }
+    RmOff read_offset = file->hash_offset;
+    file->shred_overshot = FALSE;
+    gboolean stop = FALSE;
 
-    /* tell the hasher we have finished */
-    rm_hasher_task_queue_callback(task, NULL, FALSE, TRUE);
+    while(!stop) {
+        /* hash the next increment of the file */
+        guint bytes_to_read = rm_shred_get_read_size(file, read_offset, shredder);
+        if(!rm_hasher_task_hash(task, file_path, read_offset, bytes_to_read,
+                                file->is_symlink)) {
+            /* rm_hasher_start_increment failed somewhere */
+            file->lint_type = RM_LINT_TYPE_READ_ERROR;
+            stop = TRUE;
+        }
+        read_offset += bytes_to_read;
+
+        /* Update totals for file, device and session*/
+        if(file->is_symlink) {
+            rm_shred_send(shredder, NULL, 0, -(gint64)file->file_size);
+        } else {
+            rm_shred_send(shredder, NULL, 0, -(gint64)bytes_to_read);
+        }
+
+        /* can't continue to next increment if at end of file */
+        stop = stop || (read_offset == file->file_size);
+        /* don't force to next increment if on SSD since they have no seek penalty */
+        stop = stop || !rm_mds_device_is_rotational(file->disk);
+        /* if file is already 2 increments ahead of its siblings then stop
+         * (not strictly threadsafe but false positives are harmless): */
+        stop = stop || file->shred_overshot;
+        /* if reading is 2 increments ahead of hashing then stop
+         * (not strictly threadsafe but false positives are harmless): */
+        stop = stop || file->hash_offset + bytes_to_read < read_offset;
+        /* trigger hasher callback */
+        rm_hasher_task_queue_callback(task, GUINT_TO_POINTER(bytes_to_read), FALSE, stop);
+    }
 }
 
 void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,

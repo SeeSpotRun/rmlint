@@ -1216,7 +1216,7 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
     if(cfg->checksum_type == RM_DIGEST_PARANOID) {
         /* allocate any spare mem for paranoid hashing */
         shredder.paranoid_mem_alloc = (gint64)cfg->total_mem - (gint64)mem_used;
-        shredder.paranoid_mem_alloc = MAX(0, shredder.paranoid_mem_alloc);
+        shredder.paranoid_mem_alloc = MAX(1, shredder.paranoid_mem_alloc);
         rm_log_debug_line("Paranoid Mem: %" LLU, shredder.paranoid_mem_alloc);
         /* paranoid memory manager takes care of memory load; */
         read_buffer_mem = 0;

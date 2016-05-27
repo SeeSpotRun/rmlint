@@ -62,9 +62,6 @@ struct _RmHasher {
     /* async queue for recycling hashpipes after task finished */
     GAsyncQueue *hashpipe_pool;
 
-    /* async queue for returning completed digests to the calling routine */
-    GAsyncQueue *return_queue;
-
     gsize buf_size;
 };
 
@@ -85,6 +82,49 @@ struct _RmHasherTask {
     gboolean finalise;
 };
 
+typedef struct RmSignal {
+    GMutex lock;
+    GCond cond;
+    gboolean done;
+} RmSignal;
+
+static RmSignal *rm_signal_new(void) {
+    RmSignal *self = g_slice_new(RmSignal);
+    g_mutex_init(&self->lock);
+    g_cond_init(&self->cond);
+    self->done = FALSE;
+    return self;
+}
+
+static void rm_signal_wait(RmSignal *signal) {
+    g_mutex_lock(&signal->lock);
+    {
+        while(!signal->done) {
+            g_cond_wait(&signal->cond, &signal->lock);
+        }
+    }
+    g_mutex_unlock(&signal->lock);
+    g_mutex_clear(&signal->lock);
+    g_cond_clear(&signal->cond);
+    g_slice_free(RmSignal, signal);
+}
+
+static void rm_signal_done(RmSignal *signal) {
+    g_mutex_lock(&signal->lock);
+    {
+        signal->done = TRUE;
+        g_cond_signal(&signal->cond);
+    }
+    g_mutex_unlock(&signal->lock);
+}
+
+typedef struct RmHasherMsg {
+    RmHasherTask *task;
+    gpointer message;
+    gboolean is_final;
+    RmSignal *signal;
+} RmHasherMsg;
+
 static void rm_hasher_task_free(RmHasherTask *self) {
     g_async_queue_push(self->hasher->hashpipe_pool, self->hashpipe);
     g_slice_free(RmHasherTask, self);
@@ -97,14 +137,24 @@ static void rm_hasher_hashpipe_worker(RmBuffer *buffer, RmHasher *hasher) {
         rm_assert_gentle(buffer->user_data == NULL);
         rm_digest_buffered_update(buffer);
     } else if(buffer->user_data) {
-        /* finalise via callback */
-        RmHasherTask *task = buffer->user_data;
-        rm_assert_gentle(task->digest == buffer->digest);
-
-        hasher->callback(hasher, task->digest, hasher->session_user_data,
-                         task->task_user_data);
-        rm_hasher_task_free(task);
+        /* do  callback */
+        RmHasherMsg *msg = buffer->user_data;
+        rm_assert_gentle(msg->task);
+        rm_assert_gentle(msg->task->digest);
+        rm_assert_gentle(buffer->digest);
+        rm_assert_gentle(msg->task->digest == buffer->digest);
         rm_buffer_release(buffer);
+
+        hasher->callback(hasher, msg->task->digest, hasher->session_user_data,
+                         msg->task->task_user_data, msg->message, msg->is_final);
+
+        if(msg->is_final) {
+            rm_hasher_task_free(msg->task);
+        }
+        if(msg->signal) {
+            rm_signal_done(msg->signal);
+        }
+        g_slice_free(RmHasherMsg, msg);
     }
 }
 
@@ -188,7 +238,6 @@ static gint64 rm_hasher_buffered_read(RmHasher *hasher, GThreadPool *hashpipe,
 
         buffer->len = bytes_read;
         buffer->digest = digest;
-        buffer->user_data = NULL;
 
         rm_util_thread_pool_push(hashpipe, buffer);
 
@@ -285,7 +334,6 @@ static gint64 rm_hasher_unbuffered_read(RmHasher *hasher, GThreadPool *hashpipe,
             RmBuffer *buffer = buffers[i];
             buffer->len = MIN(hasher->buf_size, bytes_read - i * hasher->buf_size);
             buffer->digest = digest;
-            buffer->user_data = NULL;
 
             /* Send it to the hasher */
             rm_util_thread_pool_push(hashpipe, buffer);
@@ -328,14 +376,6 @@ static void rm_hasher_hashpipe_free(GThreadPool *hashpipe, bool wait) {
     g_thread_pool_free(hashpipe, FALSE, wait);
 }
 
-/* local joiner if user provides no joiner to rm_hasher_new() */
-static RmHasherCallback *rm_hasher_joiner(RmHasher *hasher, RmDigest *digest,
-                                          _UNUSED gpointer session_user_data,
-                                          _UNUSED gpointer task_user_data) {
-    g_async_queue_push(hasher->return_queue, digest);
-    return 0;
-}
-
 //////////////////////////////////////
 //     API
 //////////////////////////////////////
@@ -353,14 +393,7 @@ RmHasher *rm_hasher_new(RmDigestType digest_type,
     self->use_buffered_read = use_buffered_read;
     self->buf_size = buf_size;
     self->cache_quota_bytes = cache_quota_bytes;
-
-    if(joiner) {
-        self->callback = joiner;
-    } else {
-        self->callback = (RmHasherCallback)rm_hasher_joiner;
-        self->return_queue = g_async_queue_new();
-    }
-
+    self->callback = joiner;
     self->session_user_data = session_user_data;
 
     /* Create buffer mem pool */
@@ -429,18 +462,32 @@ gboolean rm_hasher_task_hash(RmHasherTask *task, char *path, guint64 start_offse
     return ((is_symlink && bytes_read == 0) || bytes_read == bytes_to_read);
 }
 
-RmDigest *rm_hasher_task_finish(RmHasherTask *task) {
-    /* get a dummy buffer to use to signal the hasher thread that this increment is
-     * finished */
-    RmHasher *hasher = task->hasher;
-    RmBuffer *finisher = rm_buffer_get(task->hasher->mem_pool);
-    finisher->digest = task->digest;
-    finisher->len = 0;
-    finisher->user_data = task;
-    rm_util_thread_pool_push(task->hashpipe, finisher);
+RmDigest *rm_hasher_task_queue_callback(RmHasherTask *task, gpointer message,
+                                        gboolean wait, gboolean free) {
+    /* build an RmHasherMsg */
+    RmHasherMsg *msg = g_slice_new(RmHasherMsg);
+    msg->message = message;
+    msg->is_final = free;
+    msg->task = task;
+    msg->signal = NULL;
+    RmDigest *digest = task->digest;
+    RmSignal *signal = NULL;
+    if(wait) {
+        signal = rm_signal_new();
+        msg->signal = signal;
+    }
 
-    if(hasher->return_queue) {
-        return g_async_queue_pop(hasher->return_queue);
+    /* use a dummy buffer to send the message */
+    RmBuffer *envelope = rm_buffer_get(task->hasher->mem_pool);
+    envelope->digest = task->digest;
+    envelope->len = 0;
+    envelope->user_data = msg;
+
+    rm_util_thread_pool_push(task->hashpipe, envelope);
+
+    if(wait) {
+        rm_signal_wait(signal);
+        return digest;
     } else {
         return NULL;
     }

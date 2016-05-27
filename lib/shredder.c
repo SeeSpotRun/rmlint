@@ -861,7 +861,8 @@ static void rm_shred_reschedule(RmFile *file) {
 /* Hasher callback when file increment hashing is completed.
  * */
 static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
-                                   _UNUSED RmShredTag *shredder, RmFile *file) {
+                                   _UNUSED RmShredTag *shredder, RmFile *file,
+                                   _UNUSED gpointer message, _UNUSED gboolean is_last) {
     if(!file->digest) {
         file->digest = digest;
     }
@@ -1117,10 +1118,7 @@ static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     }
 
     /* tell the hasher we have finished */
-    rm_hasher_task_finish(task);
-
-    /* rm_shred_hash_callback will take care of the file */
-    file = NULL;
+    rm_hasher_task_queue_callback(task, NULL, FALSE, TRUE);
 }
 
 void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,

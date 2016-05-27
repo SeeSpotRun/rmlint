@@ -77,7 +77,9 @@ typedef struct _RmHasherTask RmHasherTask;
 typedef int (*RmHasherCallback)(RmHasher *hasher,
                                 RmDigest *digest,
                                 gpointer session_user_data,
-                                gpointer task_user_data);
+                                gpointer task_user_data,
+                                gpointer message,
+                                gboolean is_final);
 
 /**
  * @brief Allocate and initialise a new hashing object
@@ -144,13 +146,18 @@ gboolean rm_hasher_task_hash(RmHasherTask *task,
                              gboolean is_symlink);
 
 /**
- * @brief Finalise a hashing task
+ * @brief queue a hasher callback after currently pending buffers are hashed.
  *
  * @param task  An existing RmHasherTask
+ * @param message Message to pass to callback
+ * @param wait Whether to wait for callback to be executed before returning.
+ * @param free Whether to free the RmHasherTask on completion of callback.
  *
- * If a NULL callback passed, will wait for the task to finish and return the finalised
- *RmDigest to caller.
+ * @return If wait==TRUE then returns digest, else returns NULL.
  **/
-RmDigest *rm_hasher_task_finish(RmHasherTask *task);
+RmDigest *rm_hasher_task_queue_callback(RmHasherTask *task,
+                                        gpointer message,
+                                        gboolean wait,
+                                        gboolean free);
 
 #endif /* end of include guard */

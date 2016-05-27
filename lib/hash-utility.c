@@ -233,7 +233,7 @@ int rm_hasher_main(int argc, const char **argv) {
             tag.read_succesful[i] =
                 rm_hasher_task_hash(task, tag.paths[i], 0, stat_buf.st_size, FALSE);
 
-            rm_hasher_task_finish(task);
+            rm_hasher_task_queue_callback(task, NULL, FALSE, TRUE);
             continue;
         } else {
             rm_log_warning_line(_("%s: Unknown file type"), tag.paths[i]);

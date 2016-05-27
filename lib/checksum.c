@@ -107,6 +107,8 @@ RmBuffer *rm_buffer_get(RmBufferPool *pool) {
     g_mutex_unlock(&pool->lock);
 
     rm_assert_gentle(buffer);
+    buffer->user_data = NULL;
+    buffer->len = 0;
     return buffer;
 }
 

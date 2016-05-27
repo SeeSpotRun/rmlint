@@ -310,8 +310,9 @@
 typedef struct RmShredTag {
     RmCfg *cfg;
     GMutex hash_mem_mtx;
-    gint64 paranoid_mem_alloc; /* how much memory to allocate for paranoid checks */
-    gint32 active_groups; /* how many shred groups active (only used with paranoid) */
+    GCond hash_mem_cond;
+    gint64 paranoid_mem_alloc; /* how much memory available for paranoid checks */
+
     RmHasher *hasher;
     RmMDS *mds;
     /* threadpool for sending files and progress updates to session.c */
@@ -325,6 +326,7 @@ typedef struct RmShredTag {
     gint64 remaining_bytes;
 
     bool after_preprocess : 1;
+    bool mds_started : 1;
 
 } RmShredTag;
 
@@ -406,9 +408,6 @@ typedef struct RmShredGroup {
 
     /* Factor of SHRED_BALANCED_PAGES to read next time */
     gint64 offset_factor;
-
-    /* allocated memory for paranoid hashing */
-    RmOff mem_allocation;
 
     /* checksum structure taken from first file to enter the group.  This allows
      * digests to be released from RmFiles and memory freed up until they
@@ -536,114 +535,20 @@ static gint32 rm_shred_get_read_size(RmFile *file, RmShredTag *shredder) {
 /* Memory manager (only used for RM_DIGEST_PARANOID at the moment
  * but could also be adapted for other digests if very large
  * filesystems are contemplated)
+ * sign: files>0 to return mem, files<0 to take mem.
  */
-
-static void rm_shred_mem_return(RmShredGroup *group) {
-    if(group->is_active) {
-        RmShredTag *shredder = group->shredder;
-        g_mutex_lock(&shredder->hash_mem_mtx);
-        {
-            shredder->paranoid_mem_alloc += group->mem_allocation;
-            shredder->active_groups--;
-            group->is_active = FALSE;
-#if _RM_SHRED_DEBUG
-            rm_log_debug_line("Mem avail %" LLI ", active groups %d. " YELLOW
-                              "Returned %" LLU " bytes for paranoid hashing.",
-                              shredder->paranoid_mem_alloc,
-                              shredder->active_groups,
-                              group->mem_allocation);
-#endif
-            shredder->mem_refusing = FALSE;
-            if(group->digest) {
-                rm_assert_gentle(group->digest->type == RM_DIGEST_PARANOID);
-                rm_digest_free(group->digest);
-                group->digest = NULL;
-            }
-        }
-        g_mutex_unlock(&shredder->hash_mem_mtx);
-        group->mem_allocation = 0;
+static gint64 rm_shred_mem_adjust(RmShredTag *shredder, gint files, gint64 size) {
+    if(shredder->after_preprocess || shredder->cfg->checksum_type != RM_DIGEST_PARANOID) {
+        return 1;
     }
-}
-
-/* what is the maximum number of files that a group may end up with (including
- * parent, grandparent etc group files that haven't been hashed yet)?
- */
-static gulong rm_shred_group_potential_file_count(RmShredGroup *group) {
-    if(group) {
-        return group->num_pending + rm_shred_group_potential_file_count(group->parent);
-    } else {
-        return 0;
-    }
-}
-
-/* Governer to limit memory usage by limiting how many RmShredGroups can be
- * active at any one time
- * NOTE: group_lock must be held before calling rm_shred_check_paranoid_mem_alloc
- */
-static bool rm_shred_check_paranoid_mem_alloc(RmShredGroup *group,
-                                              int active_group_threshold) {
-    if(group->status >= RM_SHRED_GROUP_HASHING) {
-        /* group already committed */
-        return true;
-    }
-
-    gint64 mem_required =
-        (rm_shred_group_potential_file_count(group) / 2 + 1) *
-        MIN(group->file_size - group->hash_offset, SHRED_PARANOID_BYTES);
-
-    bool result = FALSE;
-    RmShredTag *shredder = group->shredder;
+    gint64 result;
     g_mutex_lock(&shredder->hash_mem_mtx);
     {
-        gint64 inherited = group->parent ? group->parent->mem_allocation : 0;
-
-        if(mem_required <= shredder->paranoid_mem_alloc + inherited ||
-           (shredder->active_groups <= active_group_threshold)) {
-            /* ok to proceed */
-            /* only take what we need from parent */
-            inherited = MIN(inherited, mem_required);
-            if(inherited > 0) {
-                group->parent->mem_allocation -= inherited;
-                group->mem_allocation += inherited;
-            }
-
-            /* take the rest from bank */
-            gint64 borrowed =
-                MIN(mem_required - inherited, (gint64)shredder->paranoid_mem_alloc);
-            shredder->paranoid_mem_alloc -= borrowed;
-            group->mem_allocation += borrowed;
-
-            if(shredder->mem_refusing) {
-                rm_log_debug_line("Mem avail %" LLI ", active groups %d. Borrowed %" LLI
-                                  ". Inherited: %" LLI " bytes for paranoid hashing",
-                                  shredder->paranoid_mem_alloc, shredder->active_groups,
-                                  borrowed, inherited);
-
-                if(mem_required > borrowed + inherited) {
-                    rm_log_debug_line("...due to %i active group limit",
-                                      active_group_threshold);
-                }
-
-                shredder->mem_refusing = FALSE;
-            }
-
-            shredder->active_groups++;
-            group->is_active = TRUE;
-            group->status = RM_SHRED_GROUP_HASHING;
-            result = TRUE;
-        } else {
-            if(!shredder->mem_refusing) {
-                rm_log_debug_line(
-                    "Mem avail %" LLI ", active groups %d. " RED
-                    "Refused request for %" LLU " bytes for paranoid hashing.",
-                    shredder->paranoid_mem_alloc, shredder->active_groups, mem_required);
-                shredder->mem_refusing = TRUE;
-            }
-            result = FALSE;
-        }
+        shredder->paranoid_mem_alloc += (gint64)files * MIN(size, SHRED_PARANOID_BYTES);
+        result = shredder->paranoid_mem_alloc;
+        g_cond_signal(&shredder->hash_mem_cond);
     }
     g_mutex_unlock(&shredder->hash_mem_mtx);
-
     return result;
 }
 
@@ -665,11 +570,13 @@ RmShredBuffer *rm_shred_buffer_new(GQueue *files, gint delta_files, gint64 delta
 }
 
 /* send updates and/or results to session.c */
-static void rm_shred_send(GThreadPool *pipe, GQueue *files, gint delta_files,
+static void rm_shred_send(RmShredTag *shredder, GQueue *files, gint delta_files,
                           gint64 delta_bytes) {
+    gint64 file_size = 0;
     if(files) {
         RmFile *head = files->head->data;
         rm_assert_gentle(head);
+        file_size = head->file_size;
 #if _RM_SHRED_DEBUG
         RM_DEFINE_PATH(head);
         rm_log_debug_line("Forwarding %s's group", head_path);
@@ -690,8 +597,17 @@ static void rm_shred_send(GThreadPool *pipe, GQueue *files, gint delta_files,
             }
         }
     }
+
+    /* adjust hash mem allowance */
+    if(delta_files != 0) {
+        if(file_size == 0) {
+            file_size = delta_bytes / delta_files;
+        }
+        rm_shred_mem_adjust(shredder, -delta_files, file_size);
+    }
     /* send to session.c */
-    g_thread_pool_push(pipe, rm_shred_buffer_new(files, delta_files, delta_bytes), NULL);
+    g_thread_pool_push(shredder->shredder_pipe,
+                       rm_shred_buffer_new(files, delta_files, delta_bytes), NULL);
 }
 
 /* Unlink dead RmFile from Shredder
@@ -701,13 +617,12 @@ static void rm_shred_discard_file(RmFile *file, RmLintType lint_type) {
     file->lint_type = lint_type;
     rm_assert_gentle(file->shred_group->shredder);
     RmShredTag *shredder = file->shred_group->shredder;
-    GThreadPool *shredder_pipe = shredder->shredder_pipe;
 
     /* session.c expects files in a GQueue; can't send file directly*/
     GQueue *coffin = g_queue_new();
     g_queue_push_head(coffin, file);
 
-    rm_shred_send(shredder_pipe, coffin, 0, 0);
+    rm_shred_send(shredder, coffin, 0, 0);
 }
 
 /* Push file to scheduler queue.
@@ -775,7 +690,7 @@ static void rm_shred_group_output(RmShredGroup *group) {
         }
 
         /* send files to session for output and file freeing */
-        rm_shred_send(group->shredder->shredder_pipe, group->held_files, 0, 0);
+        rm_shred_send(group->shredder, group->held_files, 0, 0);
         group->held_files = NULL;
     }
 
@@ -788,9 +703,6 @@ static void rm_shred_group_output(RmShredGroup *group) {
 
 /* call unlocked; should be no contention issues since group is finished */
 static void rm_shred_group_finalise(RmShredGroup *self) {
-    /* return any paranoid mem allocation */
-    rm_shred_mem_return(self);
-
     switch(self->status) {
     case RM_SHRED_GROUP_DORMANT:
         /* Dead-ended files; may still be wanted by some output formatters */
@@ -880,8 +792,7 @@ static gint rm_shred_num_files(RmFile *file) {
 }
 
 /* Call with shred_group->lock unlocked. */
-static RmFile *rm_shred_group_push_file(RmShredGroup *shred_group, RmFile *file,
-                                        gboolean initial) {
+static RmFile *rm_shred_group_push_file(RmShredGroup *shred_group, RmFile *file) {
     RmFile *result = NULL;
     rm_assert_gentle(shred_group);
     file->shred_group = shred_group;
@@ -927,9 +838,6 @@ static RmFile *rm_shred_group_push_file(RmShredGroup *shred_group, RmFile *file,
                                   (GDestroyNotify)rm_shred_push_queue);
                 shred_group->held_files = NULL; /* won't need shred_group queue any more,
                                                    since new arrivals will bypass */
-            }
-            if(shred_group->digest_type == RM_DIGEST_PARANOID && !initial) {
-                rm_shred_check_paranoid_mem_alloc(shred_group, 1);
             }
         /* FALLTHROUGH */
         case RM_SHRED_GROUP_HASHING:
@@ -1015,7 +923,7 @@ static RmFile *rm_shred_sift(RmFile *file) {
                                child_group->digest);
             }
             rm_assert_gentle(child_group);
-            result = rm_shred_group_push_file(child_group, file, FALSE);
+            result = rm_shred_group_push_file(child_group, file);
         }
 
         /* is current shred group needed any longer? */
@@ -1102,11 +1010,10 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredGroup *group) {
                                                                  ? file->path_index + 1
                                                                  : file->dev);
     rm_mds_device_ref(file->disk, 1);
-    rm_shred_send(shredder->shredder_pipe, NULL, 1,
-                  (gint64)file->file_size - file->hash_offset);
+    rm_shred_send(shredder, NULL, 1, (gint64)file->file_size - file->hash_offset);
 
     rm_assert_gentle(group);
-    rm_shred_group_push_file(group, file, true);
+    rm_shred_group_push_file(group, file);
 
     if(cfg->read_cksum_from_xattr) {
         char *ext_cksum = rm_xattr_read_hash(shredder->cfg, file);
@@ -1130,10 +1037,13 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     rm_assert_gentle(files);
     rm_assert_gentle(files->data);
 
-    RmShredGroup *group = rm_shred_group_new(files->data, shredder);
+    RmFile *first = files->data;
+    RmShredGroup *group = rm_shred_group_new(first, shredder);
+    group->parent = GINT_TO_POINTER(1); /* dummy parent to prevent premature free */
     group->digest_type = shredder->cfg->checksum_type;
     group->shredder = shredder;
 
+    rm_shred_mem_adjust(shredder, -g_slist_length(files), first->file_size);
     g_slist_foreach(files, (GFunc)rm_shred_file_preprocess, group);
     g_slist_free(files);
 
@@ -1143,21 +1053,35 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     }
 
     rm_assert_gentle(group);
-    /* remove group if it failed to launch (eg if only 1 file) */
-    if(group->status == RM_SHRED_GROUP_DORMANT) {
-        rm_shred_group_finalise(group);
+    /* give the group its independence */
+    rm_shred_group_make_orphan(group);
+
+    /* check paranoid mem avail - hold back groups if out of mem */
+    g_mutex_lock(&shredder->hash_mem_mtx);
+    {
+        while(shredder->paranoid_mem_alloc <= 0) {
+            rm_log_debug_line("shredder: waiting for mem");
+            if(!shredder->mds_started) {
+                rm_mds_start(shredder->mds);
+                shredder->mds_started = TRUE;
+            }
+            g_cond_wait(&shredder->hash_mem_cond, &shredder->hash_mem_mtx);
+        }
     }
+    g_mutex_unlock(&shredder->hash_mem_mtx);
 }
 
 static void rm_shred_preprocess_input(RmShredTag *shredder, RmFileTables *tables) {
     /* move files from node tables into initial RmShredGroups */
     rm_log_debug_line("preparing size groups for shredding (dupe finding)...");
+    /* small files first... */
+    tables->size_groups = g_slist_reverse(tables->size_groups);
     g_slist_foreach(tables->size_groups, (GFunc)rm_shred_preprocess_group, shredder);
     g_slist_free(tables->size_groups);
     tables->size_groups = NULL;
 
     /* special signal for end of preprocessing */
-    rm_shred_send(shredder->shredder_pipe, NULL, 0, 0);
+    rm_shred_send(shredder, NULL, 0, 0);
 }
 
 /////////////////////////////////
@@ -1265,11 +1189,6 @@ static bool rm_shred_reassign_checksum(RmShredTag *shredder, RmFile *file) {
             group->has_only_ext_cksums = 0;
         }
     } else if(group->digest_type == RM_DIGEST_PARANOID) {
-        /* check if memory allocation is ok */
-        if(!rm_shred_check_paranoid_mem_alloc(group, 0)) {
-            return false;
-        }
-
         /* get the required target offset into group->next_offset, so that
          * we can make the paranoid RmDigest the right size*/
         g_mutex_lock(&group->lock);
@@ -1371,9 +1290,9 @@ static gint rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
         /* Update totals for file, device and session*/
         file->hash_offset += bytes_to_read;
         if(file->is_symlink) {
-            rm_shred_send(shredder->shredder_pipe, NULL, 0, -(gint64)file->file_size);
+            rm_shred_send(shredder, NULL, 0, -(gint64)file->file_size);
         } else {
-            rm_shred_send(shredder->shredder_pipe, NULL, 0, -(gint64)bytes_to_read);
+            rm_shred_send(shredder, NULL, 0, -(gint64)bytes_to_read);
         }
 
         if(shredder_waiting) {
@@ -1414,11 +1333,12 @@ static gint rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
 void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                   GThreadPool *shredder_pipe, guint total_files) {
     RmShredTag shredder;
-    shredder.active_groups = 0;
     shredder.mem_refusing = false;
     shredder.shredder_pipe = shredder_pipe;
     shredder.cfg = cfg;
     shredder.mds = mds;
+    shredder.paranoid_mem_alloc = G_MAXINT64;
+    shredder.mds_started = FALSE;
 
     shredder.page_size = SHRED_PAGE_SIZE;
 
@@ -1426,6 +1346,7 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
 
     /* would use g_atomic, but helgrind does not like that */
     g_mutex_init(&shredder.hash_mem_mtx);
+    g_cond_init(&shredder.hash_mem_cond);
 
     g_mutex_init(&shredder.lock);
 
@@ -1435,8 +1356,6 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                      cfg->sweep_count,
                      cfg->threads_per_disk,
                      (RmMDSSortFunc)rm_mds_elevator_cmp);
-
-    rm_shred_preprocess_input(&shredder, tables);
 
     /* estimate mem used for RmFiles and allocate any leftovers to read buffer and/or
      * paranoid mem */
@@ -1467,7 +1386,6 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
      * SHRED_PAGE_SIZE * 2 => 16.5 seconds
      * SHRED_PAGE_SIZE * 4 => 15.9 seconds
      * SHRED_PAGE_SIZE * 8 => 15.8 seconds */
-
     shredder.hasher = rm_hasher_new(cfg->checksum_type,
                                     cfg->threads,
                                     cfg->use_buffered_read,
@@ -1476,7 +1394,12 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                                     (RmHasherCallback)rm_shred_hash_callback,
                                     &shredder);
 
-    rm_mds_start(shredder.mds);
+    rm_shred_preprocess_input(&shredder, tables);
+
+    shredder.after_preprocess = TRUE;  // TODO: eliminate
+    if(!shredder.mds_started) {
+        rm_mds_start(shredder.mds);
+    }
 
     /* should complete shred session and then free: */
     rm_mds_free(shredder.mds, FALSE);

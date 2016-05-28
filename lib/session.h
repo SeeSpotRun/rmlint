@@ -80,6 +80,9 @@ typedef struct RmCounters {
     RmOff shred_bytes_read;
     RmOff dup_counter;
     RmOff dup_group_counter;
+    RmOff duplicate_bytes;
+    RmOff original_bytes;
+    RmOff unique_bytes;
     RmOff other_lint_cnt;
     /* Debugging counters */
     RmOff offsets_read;

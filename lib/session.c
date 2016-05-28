@@ -190,6 +190,7 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
         rm_assert_gentle(file->hardlinks.hardlink_head);
     } else if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
         rm_fmt_write(file, session->formats, 1);
+        session->counters->unique_bytes += file->file_size;
         if(!session->cfg->cache_file_structs) {
             rm_file_destroy(file);
         }
@@ -250,6 +251,7 @@ static void rm_session_output_group(GSList *files, RmSession *session, bool merg
         if(count && file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
             if(!file->is_original) {
                 session->counters->dup_counter++;
+                session->counters->duplicate_bytes += file->file_size;
                 if(!RM_IS_BUNDLED_HARDLINK(file)) {
                     /* Only check file size if it's not a hardlink.  Since
                      * deleting hardlinks does not free any space they should
@@ -257,7 +259,11 @@ static void rm_session_output_group(GSList *files, RmSession *session, bool merg
                      */
                     session->counters->total_lint_size += file->file_size;
                 }
+            } else {
+                session->counters->original_bytes += file->file_size;
             }
+        } else {
+            session->counters->unique_bytes += file->file_size;
         }
 
         if(merge) {
@@ -319,7 +325,6 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
     if(files) {
         rm_assert_gentle(files);
         RmFile *head = files->data;
-        ;
         rm_assert_gentle(head);
         bool merge = (session->cfg->merge_directories &&
                       head->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE);

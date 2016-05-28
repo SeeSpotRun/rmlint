@@ -636,7 +636,6 @@ static void rm_shred_node_output(RmShredNode *node) {
     RmLintType lint_type = RM_LINT_TYPE_UNKNOWN;
 
     if(rm_shred_node_qualifies(node)) {
-        rm_assert_gentle(node->final);
         lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
     } else {
         lint_type = RM_LINT_TYPE_UNIQUE_FILE;
@@ -711,7 +710,7 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, gboolean con
     node->has_only_ext_cksums &= file->has_ext_cksum;
 
     /* check whether to send for further hashing, or store in the node */
-    if(rm_shred_node_qualifies(node) && !node->final) {
+    if(rm_shred_node_qualifies(node) && !node->final && node->num_inodes > 1) {
         file->shred_overshot = FALSE;
         /* push any held files to the md-scheduler for hashing */
         while(node->held_files) {

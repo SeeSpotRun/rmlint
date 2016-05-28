@@ -285,8 +285,11 @@ static void rm_fmt_elem(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *
         rm_fmt_json_sep(self, out);
 
         if(file->digest) {
-            rm_fmt_json_key(out, "checksum", checksum_str);
-            rm_fmt_json_sep(self, out);
+            /* don't output partial digests */
+            if(file->hash_offset == file->file_size) {
+                rm_fmt_json_key(out, "checksum", checksum_str);
+                rm_fmt_json_sep(self, out);
+            }
         }
 
         rm_fmt_json_key_unsafe(out, "path", file_path);

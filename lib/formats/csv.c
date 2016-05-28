@@ -63,7 +63,10 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
     checksum_str[sizeof(checksum_str) - 1] = 0;
 
     if(file->digest) {
-        rm_digest_hexstring(file->digest, checksum_str);
+        /* don't output partial digests */
+        if(file->hash_offset == file->file_size) {
+            rm_digest_hexstring(file->digest, checksum_str);
+        }
     }
 
     /* Escape quotes in the path (refer http://tools.ietf.org/html/rfc4180, item 6)*/

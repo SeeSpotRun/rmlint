@@ -657,12 +657,6 @@ static RmMountEntries *rm_mount_list_open(RmMountTable *table) {
     return self;
 }
 
-int rm_mounts_devno_to_wholedisk(_UNUSED RmMountEntry *entry, _UNUSED dev_t rdev,
-                                 _UNUSED char *disk, _UNUSED size_t disk_size,
-                                 _UNUSED dev_t *result) {
-    return blkid_devno_to_wholedisk(rdev, disk, disk_size, result);
-}
-
 static bool rm_mounts_create_tables(RmMountTable *self, bool force_fiemap) {
     /* partition dev_t to disk dev_t */
     self->part_table = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
@@ -724,8 +718,8 @@ static bool rm_mounts_create_tables(RmMountTable *self, bool force_fiemap) {
                 whole_disk = 0;
             }
         } else {
-            if(rm_mounts_devno_to_wholedisk(entry, stat_buf_dev.st_rdev, diskname,
-                                            sizeof(diskname), &whole_disk) == -1) {
+            if(blkid_devno_to_wholedisk(stat_buf_dev.st_rdev, diskname, sizeof(diskname),
+                                        &whole_disk) == -1) {
                 /* folder and devname rm_sys_stat() are ok but blkid failed; this happens
                  * when?
                  * Treat as a non-rotational device using devname dev as whole_disk key

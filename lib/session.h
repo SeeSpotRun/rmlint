@@ -77,6 +77,7 @@ typedef struct RmCounters {
     RmOff shred_bytes_total;
     RmOff shred_files_remaining;
     RmOff shred_bytes_after_preprocess;
+    RmOff shred_bytes_read;
     RmOff dup_counter;
     RmOff dup_group_counter;
     RmOff other_lint_cnt;

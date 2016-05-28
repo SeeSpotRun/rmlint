@@ -310,6 +310,9 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
             /* prevent multiple aborts */
             session->counters->shred_bytes_total = 0;
         }
+        if(buffer->bytes_were_read) {
+            session->counters->shred_bytes_read -= buffer->delta_bytes;
+        }
     }
 
     GSList *files = buffer->finished_files;
@@ -394,8 +397,7 @@ int rm_session_run(RmSession *session) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS_DONE);
         rm_log_debug_line(
             "Preprocessing finished at %.3f with %d files; ignored %d hidden files and "
-            "%d "
-            "hidden folders",
+            "%d hidden folders",
             g_timer_elapsed(session->timer, NULL), session->counters->total_files,
             session->counters->ignored_files, session->counters->ignored_folders);
 
@@ -413,6 +415,7 @@ int rm_session_run(RmSession *session) {
         session->counters->shred_bytes_total = session->counters->shred_bytes_remaining;
         session->counters->shred_files_remaining =
             session->counters->total_filtered_files;
+        session->counters->shred_bytes_read = 0;
 
         session->state = RM_PROGRESS_STATE_SHREDDER;
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER);
@@ -425,8 +428,9 @@ int rm_session_run(RmSession *session) {
         g_thread_pool_free(shredder_pipe, FALSE, TRUE);
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SHREDDER_DONE);
 
-        rm_log_debug_line("Dupe search finished at time %.3f",
-                          g_timer_elapsed(session->timer, NULL));
+        rm_log_debug_line("Dupe search finished at time %.3f, total bytes read %lu",
+                          g_timer_elapsed(session->timer, NULL),
+                          session->counters->shred_bytes_read);
     }
 
     if(cfg->merge_directories) {

@@ -513,11 +513,13 @@ static gint32 rm_shred_get_read_size(RmFile *file, RmOff read_offset,
 //       Progress Reporting      //
 ///////////////////////////////////
 
-RmShredBuffer *rm_shred_buffer_new(GSList *files, gint delta_files, gint64 delta_bytes) {
+static RmShredBuffer *rm_shred_buffer_new(GSList *files, gint delta_files,
+                                          gint64 delta_bytes, gboolean bytes_were_read) {
     RmShredBuffer *buffer = g_slice_new(RmShredBuffer);
     buffer->delta_files = delta_files;
     buffer->delta_bytes = delta_bytes;
     buffer->finished_files = files;
+    buffer->bytes_were_read = bytes_were_read;
     return buffer;
 }
 
@@ -529,6 +531,7 @@ void rm_shred_buffer_free(RmShredBuffer *buffer) {
 /* send updates and/or results to session.c */
 static void rm_shred_send(RmShredTag *shredder, GSList *files, gint delta_files,
                           gint64 delta_bytes) {
+    gboolean bytes_were_read = TRUE;
     if(files) {
         RmFile *head = files->data;
         rm_assert_gentle(head);
@@ -553,11 +556,13 @@ static void rm_shred_send(RmShredTag *shredder, GSList *files, gint delta_files,
                 delta_bytes -= file->file_size - file->hash_offset;
             }
         }
+        bytes_were_read = FALSE;
     }
 
     /* send to session.c */
-    g_thread_pool_push(shredder->shredder_pipe,
-                       rm_shred_buffer_new(files, delta_files, delta_bytes), NULL);
+    g_thread_pool_push(
+        shredder->shredder_pipe,
+        rm_shred_buffer_new(files, delta_files, delta_bytes, bytes_were_read), NULL);
 }
 
 /** Send dead RmFile to session.c
@@ -973,8 +978,6 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
     if(tree->paranoid_mem_alloc > 0) {
         g_mutex_lock(&shredder->hash_mem_mtx);
         {
-            rm_log_debug_line("shredder: mem %li to %li", shredder->paranoid_mem_alloc,
-                              shredder->paranoid_mem_alloc - tree->paranoid_mem_alloc);
             shredder->paranoid_mem_alloc -= tree->paranoid_mem_alloc;
             /* check paranoid mem avail before proceeding to next group */
             while(shredder->paranoid_mem_alloc <= 0) {
@@ -985,7 +988,6 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
                 }
                 g_cond_wait(&shredder->hash_mem_cond, &shredder->hash_mem_mtx);
             }
-            rm_log_debug_line("shred mem ok");
         }
         g_mutex_unlock(&shredder->hash_mem_mtx);
     }

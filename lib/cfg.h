@@ -107,8 +107,6 @@ typedef struct RmCfg {
      * (too big a sweep risks metadata getting pushed out of ram)*/
     RmOff sweep_count;
 
-    gboolean shred_always_wait;
-    gboolean shred_never_wait;
     gboolean fake_pathindex_as_disk;
     gboolean fake_abort;
 

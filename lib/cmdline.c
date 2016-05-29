@@ -1252,8 +1252,6 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
         {"clamp-top"              , 'Q' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(clamp_top)              , "Limit upper reading barrier"                                  , "P"}   ,
         {"limit-mem"              , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(limit_mem)              , "Specify max. memory usage target"                             , "S"}   ,
         {"sweep-files"            , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(sweep_count)            , "Specify max. file count per pass when scanning disks"         , "S"}   ,
-        {"shred-always-wait"      , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->shred_always_wait      , "Always waits for file increment to finish hashing"           , NULL}   ,
-        {"shred-never-wait"       , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->shred_never_wait       , "Never waits for file increment to finish hashing"            , NULL}   ,
         {"read-threads"           , 't' , HIDDEN           , G_OPTION_ARG_INT64    , &cfg->read_threads           , "Specify max. number of reader threads"                        , "N"}   ,
         {"hash-threads"           , 't' , HIDDEN           , G_OPTION_ARG_INT64    , &cfg->hash_threads           , "Specify max. number of hasher/sorter threads"                 , "N"}   ,
         {"threads-per-hdd"        , 0   , HIDDEN           , G_OPTION_ARG_INT      , &cfg->threads_per_hdd        , "Specify number of reader threads per rotational disk"        , NULL}   ,

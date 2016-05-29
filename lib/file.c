@@ -79,6 +79,7 @@ RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
     }
 
     self->hash_offset = start_seek;
+    self->disk_offset = (RmOff)-1;
 
     self->lint_type = type;
     self->is_prefd = is_ppath;

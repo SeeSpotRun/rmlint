@@ -309,6 +309,10 @@ typedef struct RmShredTag {
     RmMDS *mds;
     /* threadpool for sending files and progress updates to session.c */
     GThreadPool *shredder_pipe;
+
+    /* RmShredTrees held back pending paranoid mem availability */
+    GSList *trees;
+
     RmOff buffer_size;
     RmOff first_increment;
     RmOff max_increment;
@@ -448,6 +452,9 @@ typedef struct RmShredTree {
     /* memory allocation for paranoid hashing */
     gint64 paranoid_mem_alloc;
 
+    /* if the tree hdd files, the lowest disk offset of those files */
+    RmOff min_offset;
+
     /* Reference to main */
     RmShredTag *shredder;
 } RmShredTree;
@@ -459,6 +466,7 @@ static RmShredTree *rm_shred_tree_new(RmShredTag *shredder, RmFile *file) {
     tree->shredder = shredder;
     rm_shred_node_init(&tree->head, file, NULL);
     tree->head.tree = tree;
+    tree->min_offset = (RmOff)-1;
 
     g_mutex_init(&tree->lock);
 
@@ -577,19 +585,24 @@ static void rm_shred_discard_file(RmFile *file) {
     rm_shred_send(shredder, coffin, 0, 0);
 }
 
+static void rm_shred_file_set_offset(RmFile *file) {
+    if(file->disk_offset != (RmOff)-1) {
+        /* already set */
+        return;
+    }
+    if(file->cfg->build_fiemap && rm_mds_device_is_rotational(file->disk)) {
+        RM_DEFINE_PATH(file);
+        file->disk_offset = rm_offset_get_from_path(file_path, 0, NULL);
+    } else {
+        /* use inode number instead of disk offset */
+        file->disk_offset = file->inode;
+    }
+}
+
 /** Push file to scheduler queue.
  **/
 static void rm_shred_push_queue(RmFile *file) {
-    if(file->hash_offset == 0) {
-        /* first-timer; lookup disk offset */
-        if(file->cfg->build_fiemap && rm_mds_device_is_rotational(file->disk)) {
-            RM_DEFINE_PATH(file);
-            file->disk_offset = rm_offset_get_from_path(file_path, 0, NULL);
-        } else {
-            /* use inode number instead of disk offset */
-            file->disk_offset = file->inode;
-        }
-    }
+    rm_shred_file_set_offset(file);
     rm_mds_push_task(file->disk, file->dev, file->disk_offset, NULL, file);
 }
 
@@ -671,11 +684,27 @@ static gint rm_shred_num_files(RmFile *file) {
     }
 }
 
+typedef enum RmShredAddMode {
+    RM_SHRED_HOLD = 0,
+    RM_SHRED_SIFT,
+    RM_SHRED_CONTINUING
+} RmShredAddMode;
+
+static void rm_shred_node_launch_held(RmShredNode *node) {
+    /* push any held files to the md-scheduler for hashing */
+    while(node->held_files) {
+        node->num_pending++;
+        RmFile *held = node->held_files->data;
+        rm_shred_push_queue(held);
+        node->held_files = g_slist_delete_link(node->held_files, node->held_files);
+    }
+}
+
 /** rm_shred_node_add_file adds a file to the node unless it needs further
  * hashing, in which case it is added the the hashing queue instead.
  * call with tree node->tree locked
  **/
-static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, gboolean continuing) {
+static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, RmShredAddMode mode) {
     file->shred_node = node;
 
     /* logic for cfg->unmatched_basenames option */
@@ -715,21 +744,17 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, gboolean con
     node->has_only_ext_cksums &= file->has_ext_cksum;
 
     /* check whether to send for further hashing, or store in the node */
-    if(rm_shred_node_qualifies(node) && !node->final && node->num_inodes > 1) {
+    if(mode != RM_SHRED_HOLD && rm_shred_node_qualifies(node) && !node->final &&
+       node->num_inodes > 1) {
         file->shred_overshot = FALSE;
-        /* push any held files to the md-scheduler for hashing */
-        while(node->held_files) {
-            node->num_pending++;
-            RmFile *held = node->held_files->data;
-            rm_shred_push_queue(held);
-            node->held_files = g_slist_delete_link(node->held_files, node->held_files);
-        }
+        rm_shred_node_launch_held(node);
+
         /* push the new arrival too */
         node->num_pending++;
-        if(!continuing) {
+        if(mode == RM_SHRED_SIFT) {
             rm_shred_push_queue(file);
         }
-    } else if(continuing) {
+    } else if(mode == RM_SHRED_CONTINUING) {
         /* file is still hashing */
         rm_assert_gentle(!node->final);
         file->shred_overshot = TRUE;
@@ -821,7 +846,7 @@ static gboolean rm_shred_node_prune(RmShredNode *node) {
  * Note rm_shred_reschedule also does any pruning of branches that die as
  * a result.  If the last branch is removed then the tree will be freed.
  **/
-static void rm_shred_reschedule(RmFile *file, gboolean continuing) {
+static void rm_shred_reschedule(RmFile *file, RmShredAddMode mode) {
     rm_assert_gentle(file);
     RmShredNode *current = file->shred_node;
     rm_assert_gentle(current);
@@ -833,7 +858,6 @@ static void rm_shred_reschedule(RmFile *file, gboolean continuing) {
     g_mutex_lock(&tree->lock);
     {
         current->num_pending--;
-
         if(file->lint_type != RM_LINT_TYPE_DUPE_CANDIDATE) {
             /* reading/hashing failed somewhere; don't reinsert into tree */
             rm_shred_discard_file(file);
@@ -856,7 +880,7 @@ static void rm_shred_reschedule(RmFile *file, gboolean continuing) {
                 current->children = g_slist_prepend(current->children, child);
             }
             /* add file to child node, or maybe send it to hashing queue */
-            rm_shred_node_add_file(child, file, continuing);
+            rm_shred_node_add_file(child, file, mode);
         }
 
         /* check if current group (and its children) have finished; if yes
@@ -891,7 +915,7 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
         rm_xattr_write_hash(shredder->cfg, file);
     }
 
-    rm_shred_reschedule(file, !is_last);
+    rm_shred_reschedule(file, is_last ? RM_SHRED_SIFT : RM_SHRED_CONTINUING);
 }
 
 ////////////////////////////////////
@@ -949,9 +973,34 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredTree *tree) {
         }
     }
 
-    rm_shred_node_add_file(&tree->head, file, FALSE);
+    rm_shred_node_add_file(&tree->head, file, RM_SHRED_HOLD);
+
     if(cfg->checksum_type == RM_DIGEST_PARANOID) {
-        tree->paranoid_mem_alloc += MIN(file->file_size, shredder->max_increment);
+        if(rm_mds_device_is_rotational(file->disk)) {
+            rm_shred_file_set_offset(file);
+            tree->min_offset = MIN(tree->min_offset, file->disk_offset);
+        }
+        guint64 paranoid_mem_alloc = shredder->max_increment;
+        if(!rm_mds_device_is_rotational(file->disk)) {
+            paranoid_mem_alloc = paranoid_mem_alloc / 2;
+        }
+        tree->paranoid_mem_alloc += MIN(file->file_size, paranoid_mem_alloc);
+    }
+}
+
+static void rm_shred_tree_launch(RmShredTree *tree) {
+    gboolean finished = TRUE;
+    RmShredNode *node = &tree->head;
+    g_mutex_lock(&tree->lock);
+    {
+        if(rm_shred_node_qualifies(node) && node->num_inodes > 1 && !node->final) {
+            rm_shred_node_launch_held(node);
+        }
+        finished = rm_shred_node_finished(node, NULL, FALSE);
+    }
+    g_mutex_unlock(&tree->lock);
+    if(finished) {
+        rm_shred_tree_free(tree);
     }
 }
 
@@ -962,35 +1011,24 @@ static void rm_shred_preprocess_group(GSList *files, RmShredTag *shredder) {
 
     RmFile *first = files->data;
     RmShredTree *tree = rm_shred_tree_new(shredder, first);
-    gboolean launch_failure = FALSE;
 
-    g_mutex_lock(&tree->lock);
-    {
-        g_slist_foreach(files, (GFunc)rm_shred_file_preprocess, tree);
-        g_slist_free(files);
-        launch_failure = rm_shred_node_finished(&tree->head, NULL, FALSE);
-    }
-    g_mutex_unlock(&tree->lock);
-    if(launch_failure) {
-        tree->paranoid_mem_alloc = 0;
-    }
+    g_slist_foreach(files, (GFunc)rm_shred_file_preprocess, tree);
+    g_slist_free(files);
 
-    if(tree->paranoid_mem_alloc > 0) {
-        g_mutex_lock(&shredder->hash_mem_mtx);
-        {
-            shredder->paranoid_mem_alloc -= tree->paranoid_mem_alloc;
-            /* check paranoid mem avail before proceeding to next group */
-            while(shredder->paranoid_mem_alloc <= 0) {
-                rm_log_debug_line("shredder: waiting for mem");
-                if(!shredder->mds_started) {
-                    rm_mds_start(shredder->mds);
-                    shredder->mds_started = TRUE;
-                }
-                g_cond_wait(&shredder->hash_mem_cond, &shredder->hash_mem_mtx);
-            }
-        }
-        g_mutex_unlock(&shredder->hash_mem_mtx);
+    if(shredder->cfg->checksum_type == RM_DIGEST_PARANOID) {
+        /* delayed launch */
+        shredder->trees = g_slist_prepend(shredder->trees, tree);
+    } else {
+        rm_shred_tree_launch(tree);
     }
+}
+
+static gint rm_shred_tree_cmp(RmShredTree *a, RmShredTree *b) {
+    /* sort in order of lowest hdd offset; trees with only ssd files go last */
+    if(a->min_offset < b->min_offset) {
+        return -1;
+    }
+    return (a->min_offset >= b->min_offset);
 }
 
 static void rm_shred_preprocess_input(RmShredTag *shredder, RmFileTables *tables) {
@@ -1001,6 +1039,36 @@ static void rm_shred_preprocess_input(RmShredTag *shredder, RmFileTables *tables
     g_slist_foreach(tables->size_groups, (GFunc)rm_shred_preprocess_group, shredder);
     g_slist_free(tables->size_groups);
     tables->size_groups = NULL;
+
+    if(shredder->trees) {
+        rm_assert_gentle(shredder->cfg->checksum_type == RM_DIGEST_PARANOID);
+        /* launch held trees in optimised order */
+        rm_log_debug_line("Sorting shred trees into optimal order...");
+        shredder->trees = g_slist_sort(shredder->trees, (GCompareFunc)rm_shred_tree_cmp);
+        for(GSList *iter = shredder->trees; iter; iter = iter->next) {
+            RmShredTree *tree = iter->data;
+            g_mutex_lock(&shredder->hash_mem_mtx);
+            { shredder->paranoid_mem_alloc -= tree->paranoid_mem_alloc; }
+            g_mutex_unlock(&shredder->hash_mem_mtx);
+            rm_shred_tree_launch(tree);
+            /* check paranoid mem avail before proceeding to next group */
+            g_mutex_lock(&shredder->hash_mem_mtx);
+            {
+                while(shredder->paranoid_mem_alloc <= 0) {
+                    if(!shredder->mds_started) {
+                        rm_mds_start(shredder->mds);
+                        shredder->mds_started = TRUE;
+                    }
+                    rm_log_debug_line("Waiting for paranoid mem...");
+                    g_cond_wait(&shredder->hash_mem_cond, &shredder->hash_mem_mtx);
+                }
+            }
+            g_mutex_unlock(&shredder->hash_mem_mtx);
+        }
+        g_slist_free(shredder->trees);
+        shredder->trees = NULL;
+        rm_log_debug_line("All trees launched");
+    }
 
     /* special signal for end of preprocessing */
     rm_shred_send(shredder, NULL, 0, 0);
@@ -1098,11 +1166,9 @@ GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *files, RmLintType lint_
 static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     if(rm_session_was_aborted()) {
         file->lint_type = RM_LINT_TYPE_INTERRUPTED;
-        rm_shred_reschedule(file, FALSE);
+        rm_shred_reschedule(file, RM_SHRED_SIFT);
         return;
     }
-
-    RM_DEFINE_PATH(file);
 
     if(!file->digest) {
         RmCfg *cfg = shredder->cfg;
@@ -1118,6 +1184,7 @@ static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
     RmOff read_offset = file->hash_offset;
     file->shred_overshot = FALSE;
     gboolean stop = FALSE;
+    RM_DEFINE_PATH(file);
 
     while(!stop) {
         /* hash the next increment of the file */
@@ -1160,6 +1227,7 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
     shredder.mds = mds;
     shredder.paranoid_mem_alloc = G_MAXINT64;
     shredder.mds_started = FALSE;
+    shredder.trees = NULL;
 
     shredder.buffer_size = sysconf(_SC_PAGESIZE);
     shredder.first_increment =
@@ -1180,13 +1248,6 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
 
     g_mutex_init(&shredder.lock);
 
-    rm_mds_configure(shredder.mds,
-                     (RmMDSFunc)rm_shred_process_file,
-                     &shredder,
-                     cfg->sweep_count,
-                     cfg->threads_per_disk,
-                     (RmMDSSortFunc)rm_mds_elevator_cmp);
-
     /* estimate mem used for RmFiles and allocate any leftovers to read buffer and/or
      * paranoid mem */
     RmOff mem_used = SHRED_AVERAGE_MEM_PER_FILE * total_files;
@@ -1196,7 +1257,7 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
         /* allocate any spare mem for paranoid hashing */
         shredder.paranoid_mem_alloc = (gint64)cfg->total_mem - (gint64)mem_used;
         shredder.paranoid_mem_alloc = MAX(1, shredder.paranoid_mem_alloc);
-        rm_log_debug_line("Paranoid Mem: %" LLU, shredder.paranoid_mem_alloc);
+        rm_log_debug_line("Paranoid Mem Avail: %" LLU, shredder.paranoid_mem_alloc);
         /* paranoid memory manager takes care of memory load; */
         read_buffer_mem = 0;
     }
@@ -1217,12 +1278,21 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
      * SHRED_PAGE_SIZE * 4 => 15.9 seconds
      * SHRED_PAGE_SIZE * 8 => 15.8 seconds */
     shredder.hasher = rm_hasher_new(cfg->checksum_type,
-                                    cfg->threads,
+                                    cfg->hash_threads,
                                     cfg->use_buffered_read,
                                     shredder.buffer_size,
                                     read_buffer_mem,
                                     (RmHasherCallback)rm_shred_hash_callback,
                                     &shredder);
+
+    rm_mds_configure(shredder.mds,
+                     (RmMDSFunc)rm_shred_process_file,
+                     &shredder,
+                     cfg->sweep_count,
+                     cfg->threads_per_hdd,
+                     cfg->threads_per_ssd,
+                     (RmMDSSortFunc)rm_mds_elevator_cmp,
+                     NULL);
 
     rm_shred_preprocess_input(&shredder, tables);
 

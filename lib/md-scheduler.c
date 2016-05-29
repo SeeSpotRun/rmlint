@@ -212,10 +212,8 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
     RmMDSTask *task = NULL;
     while(processed < mds->pass_quota &&
           (task = rm_util_slist_pop(&device->sorted_tasks, &device->lock))) {
-        if(mds->func(task->task_data, mds->user_data)) {
-            /* task succeeded; update counters */
-            ++processed;
-        }
+        mds->func(task->task_data, mds->user_data);
+        ++processed;
         rm_mds_task_free(task);
     }
 

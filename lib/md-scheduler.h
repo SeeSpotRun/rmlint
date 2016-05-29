@@ -99,15 +99,8 @@ typedef struct RmMDSTask {
  *
  * @param task_user_data User data passed via rm_mds_push_...()
  * @param session_user_data User data passed to rm_mds_new()
- * @retval amount to decrement device worker's per-pass quota
- *
- * The number of tasks processed on each pass through a device can be
- * limited by a quota.  This may be useful in cases where the same file
- * is accessed several times in quick succession, since the file
- * metadata and data may still be cached.
- *
  **/
-typedef gint (*RmMDSFunc)(RmMDSTask *task, gpointer session_user_data);
+typedef void (*RmMDSFunc)(RmMDSTask *task, gpointer session_user_data);
 
 /**
  * @brief RmMDSTask task prioritisation function prototype

@@ -1301,8 +1301,8 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
         rm_mds_start(shredder.mds);
     }
 
-    /* should complete shred session and then free: */
-    rm_mds_free(shredder.mds, FALSE);
+    /* should complete shred session: */
+    rm_mds_finish(shredder.mds);
     rm_hasher_free(shredder.hasher, TRUE);
 
     g_mutex_clear(&shredder.hash_mem_mtx);

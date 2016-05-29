@@ -439,6 +439,8 @@ int rm_session_run(RmSession *session) {
                           session->counters->shred_bytes_read);
     }
 
+    rm_mds_free(session->mds, FALSE);
+
     if(cfg->merge_directories) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
         GThreadPool *merge_pipe =

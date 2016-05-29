@@ -1248,14 +1248,16 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
     };
 
     const GOptionEntry unusual_option_entries[] = {
-        {"clamp-low"              , 'q' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(clamp_low)              , "Limit lower reading barrier"                                 , "P"}    ,
-        {"clamp-top"              , 'Q' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(clamp_top)              , "Limit upper reading barrier"                                 , "P"}    ,
-        {"limit-mem"              , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(limit_mem)              , "Specify max. memory usage target"                            , "S"}    ,
-        {"sweep-files"            , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(sweep_count)            , "Specify max. file count per pass when scanning disks"        , "S"}    ,
+        {"clamp-low"              , 'q' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(clamp_low)              , "Limit lower reading barrier"                                  , "P"}   ,
+        {"clamp-top"              , 'Q' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(clamp_top)              , "Limit upper reading barrier"                                  , "P"}   ,
+        {"limit-mem"              , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(limit_mem)              , "Specify max. memory usage target"                             , "S"}   ,
+        {"sweep-files"            , 'u' , HIDDEN           , G_OPTION_ARG_CALLBACK , FUNC(sweep_count)            , "Specify max. file count per pass when scanning disks"         , "S"}   ,
         {"shred-always-wait"      , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->shred_always_wait      , "Always waits for file increment to finish hashing"           , NULL}   ,
         {"shred-never-wait"       , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->shred_never_wait       , "Never waits for file increment to finish hashing"            , NULL}   ,
-        {"threads"                , 't' , HIDDEN           , G_OPTION_ARG_INT64    , &cfg->threads                , "Specify max. number of hasher threads"                       , "N"}    ,
-        {"threads-per-disk"       , 0   , HIDDEN           , G_OPTION_ARG_INT      , &cfg->threads_per_disk       , "Specify number of reader threads per physical disk"          , NULL}   ,
+        {"read-threads"           , 't' , HIDDEN           , G_OPTION_ARG_INT64    , &cfg->read_threads           , "Specify max. number of reader threads"                        , "N"}   ,
+        {"hash-threads"           , 't' , HIDDEN           , G_OPTION_ARG_INT64    , &cfg->hash_threads           , "Specify max. number of hasher/sorter threads"                 , "N"}   ,
+        {"threads-per-hdd"        , 0   , HIDDEN           , G_OPTION_ARG_INT      , &cfg->threads_per_hdd        , "Specify number of reader threads per rotational disk"        , NULL}   ,
+        {"threads-per-ssd"        , 0   , HIDDEN           , G_OPTION_ARG_INT      , &cfg->threads_per_ssd        , "Specify number of reader threads per non-rotational disk"    , NULL}   ,
         {"write-unfinished"       , 'U' , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->write_unfinished       , "Output unfinished checksums"                                 , NULL}   ,
         {"xattr-write"            , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->write_cksum_to_xattr   , "Cache checksum in file attributes"                           , NULL}   ,
         {"xattr-read"             , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->read_cksum_from_xattr  , "Read cached checksums from file attributes"                  , NULL}   ,
@@ -1336,7 +1338,8 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
     }
 
     /* Silent fixes of invalid numberic input */
-    cfg->threads = CLAMP(cfg->threads, 1, 128);
+    cfg->read_threads = CLAMP(cfg->read_threads, 1, 128);
+    cfg->hash_threads = CLAMP(cfg->hash_threads, 1, 128);
     cfg->depth = CLAMP(cfg->depth, 0, PATH_MAX / 2 + 1);
 
     if(cfg->partial_hidden && !cfg->merge_directories) {

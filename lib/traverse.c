@@ -435,7 +435,7 @@ void rm_traverse_tree(const RmCfg *cfg, GThreadPool *file_pool, RmMDS *mds) {
     traverser.roots = roots;
 
     rm_mds_configure(mds, (RmMDSFunc)rm_traverse_directory, &traverser, 0,
-                     cfg->threads_per_disk, NULL);
+                     cfg->threads_per_hdd, cfg->threads_per_ssd, NULL, NULL);
 
     GHashTableIter iter;
     char *path;

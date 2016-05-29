@@ -63,6 +63,8 @@
  *
  **/
 
+typedef enum RmMDSDiskType { RM_MDS_HDD = 0, RM_MDS_SSD } RmMDSDiskType;
+
 /**
  * @struct RmMDS
  *
@@ -135,8 +137,10 @@ void rm_mds_configure(RmMDS *self,
                       const RmMDSFunc func,
                       const gpointer user_data,
                       const gint pass_quota,
-                      const gint threads_per_disk,
-                      RmMDSSortFunc prioritiser);
+                      const gint threads_per_hdd,
+                      const gint threads_per_ssd,
+                      RmMDSSortFunc hdd_prioritiser,
+                      RmMDSSortFunc ssd_prioritiser);
 
 /**
  * @brief start a paused MDS scheduler

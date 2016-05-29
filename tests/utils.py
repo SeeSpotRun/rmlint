@@ -182,9 +182,8 @@ def run_rmlint_pedantic(*args, **kwargs):
         '-PP',
         '--limit-mem 1M --algorithm=paranoid',
         '--buffered-read',
-        '--threads=1',
-        '--shred-never-wait',
-        '--shred-always-wait',
+        '--read-threads=1',
+        '--hash-threads=1',
         '--no-mount-table'
     ]
 

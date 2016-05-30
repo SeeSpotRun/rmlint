@@ -120,15 +120,18 @@
 
 /* Maximum increment size for paranoid digests.  This is smaller than for other
  * digest types due to memory management issues.
- * 16MB read at typical 100 MB/s read rate = 160ms read vs typical seek time 10ms
- * so the speed penalty is around 6% */
-#define SHRED_MAX_PARANOID (16 * 1024 * 1024)
+ * Note that on hdd's, the shredder algorithm normally reads two increments
+ * at a time.  For SHRED_MAX_PARANOID == 32MB, that gives 64MB read between
+ * seeks.  At a "typical" 4TB NAS drive sequential read rate of 150 MB/s and seek
+ * time of ~15 ms, that means each 64MB read takes 15ms to access the start and
+ * then ~430 ms to read the data, so the seek speed penalty is around 3.5% */
+#define SHRED_MAX_PARANOID (32 * 1024 * 1024)
 
 /* How quickly to (geometrically) increase increment size */
-#define SHRED_ACCELERATION (4)
+#define SHRED_ACCELERATION (8)
 
-/* empirical estimate of mem usage per file (excluding read buffers and
- * paranoid digests) */
+/* empirical estimate of mem overhead per file (excluding memory for
+ * reading, hashing and paranoid comparisons) */
 #define SHRED_AVERAGE_MEM_PER_FILE (100)
 
 ///////////////////////////////////////////////////////////////////////

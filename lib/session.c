@@ -248,22 +248,30 @@ static void rm_session_output_group(GSList *files, RmSession *session, bool merg
     for(GSList *iter = files; iter; iter = iter->next) {
         file = iter->data;
 
-        if(count && file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-            if(!file->is_original) {
-                session->counters->dup_counter++;
-                session->counters->duplicate_bytes += file->file_size;
-                if(!RM_IS_BUNDLED_HARDLINK(file)) {
-                    /* Only check file size if it's not a hardlink.  Since
-                     * deleting hardlinks does not free any space they should
-                     * not be counted unless all of them would be removed.
-                     */
-                    session->counters->total_lint_size += file->file_size;
+        if(count) {
+            RmCounters *counters = session->counters;
+            if(!RM_IS_BUNDLED_HARDLINK(file)) {
+                counters->shred_files_remaining--;
+                counters->shred_bytes_remaining -= file->file_size - file->hash_offset;
+            }
+
+            if (file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+                if(!file->is_original) {
+                    session->counters->dup_counter++;
+                    session->counters->duplicate_bytes += file->file_size;
+                    if(!RM_IS_BUNDLED_HARDLINK(file)) {
+                        /* Only check file size if it's not a hardlink.  Since
+                         * deleting hardlinks does not free any space they should
+                         * not be counted unless all of them would be removed.
+                         */
+                        session->counters->total_lint_size += file->file_size;
+                    }
+                } else {
+                    session->counters->original_bytes += file->file_size;
                 }
             } else {
-                session->counters->original_bytes += file->file_size;
+                session->counters->unique_bytes += file->file_size;
             }
-        } else {
-            session->counters->unique_bytes += file->file_size;
         }
 
         if(merge) {
@@ -295,18 +303,14 @@ static void rm_session_merge_pipe(GSList *files, RmSession *session) {
 /* threadpipe to receive duplicate files and progress updates from shredder
  */
 static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) {
-    if(buffer->delta_bytes == 0 && buffer->delta_files == 0 && !buffer->finished_files) {
+    if(buffer->delta_bytes == 0 && !buffer->finished_files) {
         /* special signal for end of shred preprocessing */
         session->state = RM_PROGRESS_STATE_SHREDDER;
     }
 
-    session->counters->shred_files_remaining += buffer->delta_files;
-    if(buffer->delta_files < 0) {
-        session->counters->total_filtered_files += buffer->delta_files;
-    }
-
     if(buffer->delta_bytes != 0) {
         session->counters->shred_bytes_remaining += buffer->delta_bytes;
+        session->counters->shred_bytes_read -= buffer->delta_bytes;
 
         /* fake interrupt option for debugging/testing: */
         if(session->state == RM_PROGRESS_STATE_SHREDDER && session->cfg->fake_abort &&
@@ -315,9 +319,6 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
             rm_session_abort();
             /* prevent multiple aborts */
             session->counters->shred_bytes_total = 0;
-        }
-        if(buffer->bytes_were_read) {
-            session->counters->shred_bytes_read -= buffer->delta_bytes;
         }
     }
 

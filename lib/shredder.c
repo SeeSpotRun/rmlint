@@ -311,6 +311,8 @@ static RmShredTree *rm_shred_tree_new(RmShredTag *shredder, RmFile *file) {
 
     g_mutex_init(&tree->lock);
 
+/* rm_shred_buffer_new creates a new buffer for communicating back to session.c */
+static RmShredBuffer *rm_shred_buffer_new(GSList *files, gint64 delta_bytes) {
     return tree;
 }
 
@@ -365,22 +367,14 @@ static gint32 rm_shred_get_read_size(RmFile *file, RmOff read_offset,
 static RmShredBuffer *rm_shred_buffer_new(GSList *files, gint delta_files,
                                           gint64 delta_bytes, gboolean bytes_were_read) {
     RmShredBuffer *buffer = g_slice_new(RmShredBuffer);
-    buffer->delta_files = delta_files;
     buffer->delta_bytes = delta_bytes;
     buffer->finished_files = files;
-    buffer->bytes_were_read = bytes_were_read;
     return buffer;
 }
 
-void rm_shred_buffer_free(RmShredBuffer *buffer) {
-    /* do not free buffer->finished_files; caller keeps ownership of that */
-    g_slice_free(RmShredBuffer, buffer);
-}
-
-/* send updates and/or results to session.c */
-static void rm_shred_send(RmShredTag *shredder, GSList *files, gint delta_files,
-                          gint64 delta_bytes) {
-    gboolean bytes_were_read = TRUE;
+/**
+ * rm_shred_send sends updates and/or results to session.c */
+static void rm_shred_send(RmShredSession *shredder, GSList *files, gint64 delta_bytes) {
     if(files) {
         RmFile *head = files->data;
         rm_assert_gentle(head);
@@ -393,7 +387,6 @@ static void rm_shred_send(RmShredTag *shredder, GSList *files, gint delta_files,
         /* TODO: maybe do this in rm_shred_group_find_original */
         /* check we don't double-count: */
         rm_assert_gentle(delta_bytes == 0);
-        rm_assert_gentle(delta_files == 0);
 
         for(GSList *iter = files; iter; iter = iter->next) {
             RmFile *file = iter->data;
@@ -401,17 +394,14 @@ static void rm_shred_send(RmShredTag *shredder, GSList *files, gint delta_files,
                 rm_assert_gentle(file->disk);
                 rm_mds_device_ref(file->disk, -1);
                 file->disk = NULL;
-                delta_files--;
-                delta_bytes -= file->file_size - file->hash_offset;
             }
         }
-        bytes_were_read = FALSE;
     }
 
     /* send to session.c */
     g_thread_pool_push(
         shredder->shredder_pipe,
-        rm_shred_buffer_new(files, delta_files, delta_bytes, bytes_were_read), NULL);
+        rm_shred_buffer_new(files, delta_bytes), NULL);
 }
 
 /** Send dead RmFile to session.c
@@ -423,7 +413,7 @@ static void rm_shred_discard_file(RmFile *file) {
 
     /* session.c expects files in a GSList; can't send file directly*/
     GSList *coffin = g_slist_append(NULL, file);
-    rm_shred_send(shredder, coffin, 0, 0);
+    rm_shred_send(shredder, coffin, 0);
 }
 
 static void rm_shred_file_set_offset(RmFile *file) {
@@ -511,7 +501,7 @@ static void rm_shred_node_output(RmShredNode *node) {
         rm_shred_group_find_original(shredder->cfg, node->held_files, lint_type);
 
     /* send files to session for output and file freeing */
-    rm_shred_send(shredder, node->held_files, 0, 0);
+    rm_shred_send(shredder, node->held_files, 0);
 }
 
 /* returns the number of actual files (including bundled
@@ -912,7 +902,7 @@ static void rm_shred_preprocess_input(RmShredTag *shredder, RmFileTables *tables
     }
 
     /* special signal for end of preprocessing */
-    rm_shred_send(shredder, NULL, 0, 0);
+    rm_shred_send(shredder, NULL, 0);
 }
 
 /////////////////////////////////
@@ -1040,9 +1030,9 @@ static void rm_shred_process_file(RmFile *file, RmShredTag *shredder) {
 
         /* Update totals for file, device and session*/
         if(file->is_symlink) {
-            rm_shred_send(shredder, NULL, 0, -(gint64)file->file_size);
+            rm_shred_send(shredder, NULL, -(gint64)file->file_size);
         } else {
-            rm_shred_send(shredder, NULL, 0, -(gint64)bytes_to_read);
+            rm_shred_send(shredder, NULL, -(gint64)bytes_to_read);
         }
 
         /* can't continue to next increment if at end of file */

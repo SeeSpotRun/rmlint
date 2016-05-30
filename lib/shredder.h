@@ -38,12 +38,14 @@ typedef enum RmShredGroupStatus {
     RM_SHRED_GROUP_FINISHED
 } RmShredGroupStatus;
 
-/* buffer for sending progress updates and/or finished files to session.c */
+/**
+ * @brief Buffer to send finished files and counting stats to session.c
+ */
 typedef struct RmShredBuffer {
-    gint64 delta_bytes;
-    gint delta_files;
-    gboolean bytes_were_read;
+    /* a list of files; may contain a set of duplicates or a unique file */
     GSList *finished_files;
+    /* progress update on number of bytes read */
+    gint64 delta_bytes;
 } RmShredBuffer;
 
 /**
@@ -65,6 +67,9 @@ GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *group, RmLintType lint_
  * @brief free an RmShredBuffer
  * @note caller retains ownership of buffer->group
  */
-void rm_shred_buffer_free(RmShredBuffer *buffer);
+static inline void rm_shred_buffer_free(RmShredBuffer *buffer) {
+    /* do not free buffer->finished_files; caller keeps ownership of that */
+    g_slice_free(RmShredBuffer, buffer);
+}
 
 #endif

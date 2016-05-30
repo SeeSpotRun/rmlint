@@ -543,26 +543,19 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, RmShredAddMo
     if(cfg->unmatched_basenames && node->num_files == 0) {
         /* first file into group sets the basename */
         node->unique_basename = file;
-        rm_log_debug_line("Unique basename: %s", file->folder->basename)
     }
     if(node->unique_basename) {
-        rm_log_debug_line("Unique basename checking...")
             /* check if we still have only 1 unique basename... */
             if(rm_file_basenames_cmp(file, node->unique_basename) != 0) {
             node->unique_basename = NULL;
-            rm_log_debug_line("Unique basename failed")
         }
         else if(file->hardlinks.is_head) {
             /* also check hardlink names */
             for(GList *iter = file->hardlinks.files->head; iter; iter = iter->next) {
                 if(rm_file_basenames_cmp(iter->data, node->unique_basename) != 0) {
                     node->unique_basename = NULL;
-                    rm_log_debug_line("Unique basename failed on hardlink") break;
                 }
             }
-        }
-        if(node->unique_basename) {
-            rm_log_debug_line("still unique");
         }
     }
 

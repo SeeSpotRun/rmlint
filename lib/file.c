@@ -146,6 +146,14 @@ RmLintType rm_file_string_to_lint_type(const char *type) {
     return RM_LINT_TYPE_UNKNOWN;
 }
 
+gint rm_file_filecount(RmFile *file) {
+    if(file->hardlinks.is_head && file->hardlinks.files) {
+        return 1 + file->hardlinks.files->length;
+    } else {
+        return 1;
+    }
+}
+
 static gint rm_file_cmp_with_extension(const RmFile *file_a, const RmFile *file_b) {
     char *ext_a = rm_util_path_extension(file_a->folder->basename);
     char *ext_b = rm_util_path_extension(file_b->folder->basename);

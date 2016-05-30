@@ -287,6 +287,10 @@ void rm_file_zip_path(RmFile *file, const char *path);
  */
 void rm_file_build_path(const RmFile *file, char *buf);
 
+/** returns the number of actual files (including bundled hardlinks) associated
+ * with an RmFile */
+gint rm_file_filecount(RmFile *file);
+
 /**
  * @brief Compare basenames of two files
  * @retval true if basenames match.

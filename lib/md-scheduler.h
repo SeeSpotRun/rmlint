@@ -115,7 +115,7 @@ typedef gint (*RmMDSSortFunc)(const RmMDSTask *task_a, const RmMDSTask *task_b);
  * @brief Allocate and initialise a new MDS scheduler
  *
  * @param max_threads  Maximum number of concurrent device threads
- * @param mount_table RmMountTable to use; if NULL then will create new one
+ * @param mount_table RmMountTable to use; if NULL then no mount table used
  * @param fake_disk Don't use mount table; use user-supplied dev as disk number
  *
  * Scheduler is initially paused.

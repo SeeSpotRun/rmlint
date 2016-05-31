@@ -304,13 +304,7 @@ RmMDS *rm_mds_new(const gint max_threads, RmMountTable *mount_table, bool fake_d
     g_cond_init(&self->cond);
 
     self->max_threads = max_threads;
-
-    if(!mount_table && !fake_disk) {
-        self->mount_table = rm_mounts_table_new(FALSE);
-    } else {
-        self->mount_table = mount_table;
-    }
-
+    self->mount_table = mount_table;
     self->fake_disk = fake_disk;
     self->disks = g_hash_table_new(g_direct_hash, g_direct_equal);
     self->running = FALSE;

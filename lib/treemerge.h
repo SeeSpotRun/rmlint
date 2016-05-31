@@ -42,13 +42,10 @@
 struct RmTreeMerger;
 typedef struct RmTreeMerger RmTreeMerger;
 
-/* RmTreeMerger is part of RmSession, therefore prototype it here */
-struct RmSession;
-
 /**
  * @brief Allocate a new RmTreeMerger structure.
  */
-RmTreeMerger *rm_tm_new(struct RmSession *session);
+RmTreeMerger *rm_tm_new(RmCfg *cfg);
 
 /**
  * @brief Add an RmFile to the pool of (to be) investigated files.

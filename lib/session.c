@@ -255,7 +255,7 @@ static void rm_session_output_group(GSList *files, RmSession *session, bool merg
                 counters->shred_bytes_remaining -= file->file_size - file->hash_offset;
             }
 
-            if (file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+            if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
                 if(!file->is_original) {
                     session->counters->dup_counter++;
                     session->counters->duplicate_bytes += file->file_size;
@@ -362,7 +362,7 @@ int rm_session_run(RmSession *session) {
 
     if(cfg->merge_directories) {
         rm_assert_gentle(cfg->cache_file_structs);
-        session->dir_merger = rm_tm_new(session);
+        session->dir_merger = rm_tm_new(cfg);
     }
 
     /* --- Traversal --- */

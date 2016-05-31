@@ -92,7 +92,7 @@ typedef struct RmDirectory {
 } RmDirectory;
 
 struct RmTreeMerger {
-    RmSession *session;        /* Session state variables / Settings                  */
+    RmCfg *cfg;                /* rmlint configuration settings                       */
     RmTrie dir_tree;           /* Path-Trie with all RmFiles as value                 */
     RmTrie count_tree;         /* Path-Trie with all file's count as value            */
     GHashTable *result_table;  /* {hash => [RmDirectory]} mapping                     */
@@ -161,14 +161,14 @@ int rm_tm_count_art_callback(_UNUSED RmTrie *self, RmNode *node, _UNUSED int lev
     return 0;
 }
 
-static bool rm_tm_count_files(RmTrie *count_tree, char **paths, RmSession *session) {
+static bool rm_tm_count_files(RmTrie *count_tree, char **paths, RmTreeMerger *merger) {
     if(*paths == NULL) {
         rm_log_error("No paths passed to rm_tm_count_files\n");
         return false;
     }
 
     int fts_flags = FTS_COMFOLLOW;
-    if(session->cfg->follow_symlinks) {
+    if(merger->cfg->follow_symlinks) {
         fts_flags |= FTS_LOGICAL;
     } else {
         fts_flags |= FTS_PHYSICAL;
@@ -329,7 +329,7 @@ static void rm_directory_to_file(RmTreeMerger *merger, const RmDirectory *self,
     memset(file, 0, sizeof(RmFile));
 
     /* Need to set cfg first, since set_path expects that */
-    file->cfg = merger->session->cfg;
+    file->cfg = merger->cfg;
     rm_file_set_path(file, self->dirname);
 
     file->lint_type = RM_LINT_TYPE_DUPE_DIR_CANDIDATE;
@@ -469,9 +469,9 @@ static void rm_directory_add_subdir(RmDirectory *parent, RmDirectory *subdir) {
 // TREE MERGER ALGORITHM //
 ///////////////////////////
 
-RmTreeMerger *rm_tm_new(RmSession *session) {
+RmTreeMerger *rm_tm_new(RmCfg *cfg) {
     RmTreeMerger *self = g_slice_new(RmTreeMerger);
-    self->session = session;
+    self->cfg = cfg;
     g_queue_init(&self->valid_dirs);
     self->free_list = g_queue_new();
 
@@ -487,7 +487,7 @@ RmTreeMerger *rm_tm_new(RmSession *session) {
     rm_trie_init(&self->dir_tree);
     rm_trie_init(&self->count_tree);
 
-    rm_tm_count_files(&self->count_tree, session->cfg->paths, session);
+    rm_tm_count_files(&self->count_tree, cfg->paths, self);
 
     return self;
 }
@@ -615,7 +615,7 @@ static void rm_tm_write_unfinished_cksums(RmTreeMerger *self, RmDirectory *direc
     for(GList *iter = directory->known_files.head; iter; iter = iter->next) {
         RmFile *file = iter->data;
         file->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
-        rm_fmt_write(file, self->session->formats, -1);
+        rm_util_thread_pool_push(self->results_pipe, g_slist_prepend(NULL, file));
     }
 
     /* Recursively propagate to children */
@@ -637,7 +637,7 @@ static int rm_tm_sort_paths_reverse(const RmDirectory *da, const RmDirectory *db
 
 static int rm_tm_sort_orig_criteria(const RmDirectory *da, const RmDirectory *db,
                                     RmTreeMerger *self) {
-    RmCfg *cfg = self->session->cfg;
+    RmCfg *cfg = self->cfg;
 
     if(da->prefd_files - db->prefd_files) {
         if(cfg->keep_all_tagged) {
@@ -705,15 +705,14 @@ static void rm_tm_send(GQueue *group, RmTreeMerger *self, gboolean find_original
     g_queue_free(group);
 
     if(find_original) {
-        list = rm_shred_group_find_original(self->session->cfg, list,
-                                            RM_LINT_TYPE_DUPE_CANDIDATE);
+        list = rm_shred_group_find_original(self->cfg, list, RM_LINT_TYPE_DUPE_CANDIDATE);
     }
     rm_util_thread_pool_push(self->results_pipe, list);
 }
 
 static void rm_tm_extract(RmTreeMerger *self) {
     /* Iterate over all directories per hash (which are same therefore) */
-    RmCfg *cfg = self->session->cfg;
+    RmCfg *cfg = self->cfg;
     GList *result_table_values = g_hash_table_get_values(self->result_table);
     result_table_values =
         g_list_sort(result_table_values, (GCompareFunc)rm_tm_cmp_directory_groups);
@@ -782,7 +781,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
                 }
             }
 
-            if(self->session->cfg->write_unfinished) {
+            if(self->cfg->write_unfinished) {
                 rm_tm_write_unfinished_cksums(self, directory);
             }
         }
@@ -824,17 +823,14 @@ static void rm_tm_extract(RmTreeMerger *self) {
 
     GQueue *file_list = NULL;
     while(g_hash_table_iter_next(&iter, NULL, (void **)&file_list)) {
-        if(self->session->cfg->partial_hidden) {
+        if(self->cfg->partial_hidden) {
             /* with --partial-hidden we do not want to output */
             rm_util_queue_foreach_remove(file_list, (RmRFunc)rm_tm_hidden_file, NULL);
         }
 
         if(file_list->length >= 2) {
             /* If no separate duplicate files are requested, we can stop here */
-            if(self->session->cfg->find_duplicates == false) {
-                self->session->counters->dup_group_counter -= 1;
-                self->session->counters->dup_counter -= file_list->length - 1;
-            } else {
+            if(self->cfg->find_duplicates) {
                 rm_tm_send(file_list, self, TRUE);
             }
         }

@@ -221,6 +221,9 @@ bool rm_fmt_add(RmFmtTable *self, const char *handler_name, const char *path) {
 }
 
 static void rm_fmt_write_impl(RmFile *result, RmFmtTable *self) {
+    if(result->lint_type == RM_LINT_TYPE_INTERRUPTED) {
+        return;
+    }
     RM_FMT_FOR_EACH_HANDLER(self) {
         RM_FMT_CALLBACK(handler->elem, result);
     }

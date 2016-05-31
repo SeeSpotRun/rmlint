@@ -60,9 +60,10 @@ static void rm_fmt_prog(RmSession *session,
          * Progressbar might leave some junk.
          */
         struct winsize terminal;
-        ioctl(fileno(out), TIOCGWINSZ, &terminal);
-        for(int i = 0; i < terminal.ws_col; ++i) {
-            fprintf(out, " ");
+        if(ioctl(fileno(out), TIOCGWINSZ, &terminal) == 0) {
+            for(int i = 0; i < terminal.ws_col; ++i) {
+                fprintf(out, " ");
+            }
         }
 
         fprintf(out, "\n");

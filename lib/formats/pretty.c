@@ -98,7 +98,8 @@ static void rm_fmt_elem(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *
                         RmFile *file) {
     RmFmtHandlerProgress *self = (RmFmtHandlerProgress *)parent;
 
-    if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
+    if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE ||
+       file->lint_type == RM_LINT_TYPE_DUPE_DIR_FILE) {
         /* pretty output should not contain this */
         return;
     }

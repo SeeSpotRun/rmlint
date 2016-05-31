@@ -871,8 +871,6 @@ static gboolean rm_cmd_parse_merge_directories(_UNUSED const char *option_name,
     rm_cmd_parse_partial_hidden(NULL, NULL, cmd, error);
     cmd->cfg->find_hardlinked_dupes = true;
 
-    /* Keep RmFiles after shredder. */
-    cmd->cfg->cache_file_structs = true;
     return true;
 }
 

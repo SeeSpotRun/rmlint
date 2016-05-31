@@ -69,6 +69,9 @@ typedef enum RmLintType {
      */
     RM_LINT_TYPE_DUPE_DIR_CANDIDATE,
 
+    /* file within a duplicate dir */
+    RM_LINT_TYPE_DUPE_DIR_FILE,
+
     /* Special type for files that got sieved out during shreddering.
      * if cfg->write_unfinished is true, those may be included in the
      * json/xattr/csv output.

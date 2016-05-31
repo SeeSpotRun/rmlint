@@ -571,12 +571,33 @@ void rm_tm_feed(RmTreeMerger *self, RmFile *file) {
     }
 }
 
+/* needed because someone rewrote shredder to use GSList instead of GQueue*/
+static void rm_tm_send(GQueue *group, RmTreeMerger *self, gboolean find_original) {
+    GSList *list = NULL;
+    for(GList *iter = group->tail; iter; iter = iter->prev) {
+        list = g_slist_prepend(list, iter->data);
+    }
+
+    if(find_original) {
+        list = rm_shred_group_find_original(self->cfg, list, RM_LINT_TYPE_DUPE_CANDIDATE);
+    }
+    rm_util_thread_pool_push(self->results_pipe, list);
+}
+
 static void rm_tm_mark_finished(RmTreeMerger *self, RmDirectory *directory) {
     if(directory->finished) {
         return;
     }
 
     directory->finished = true;
+
+    /* tag files as dupe dir files */
+    for(GList *iter = directory->known_files.head; iter; iter = iter->next) {
+        RmFile *file = iter->data;
+        file->lint_type = RM_LINT_TYPE_DUPE_DIR_FILE;
+    }
+    rm_tm_send(&directory->known_files, self, FALSE);
+    g_queue_clear(&directory->known_files);
 
     /* Recursively propagate to children */
     for(GList *iter = directory->children.head; iter; iter = iter->next) {
@@ -614,7 +635,7 @@ static gint64 rm_tm_mark_duplicate_files(RmTreeMerger *self, RmDirectory *direct
 static void rm_tm_write_unfinished_cksums(RmTreeMerger *self, RmDirectory *directory) {
     for(GList *iter = directory->known_files.head; iter; iter = iter->next) {
         RmFile *file = iter->data;
-        file->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
+        file->lint_type = RM_LINT_TYPE_DUPE_DIR_FILE;
         rm_util_thread_pool_push(self->results_pipe, g_slist_prepend(NULL, file));
     }
 
@@ -696,20 +717,6 @@ static int rm_tm_hidden_file(RmFile *file, _UNUSED gpointer user_data) {
     return file->is_hidden;
 }
 
-/* needed because someone rewrote shredder to use GSList instead og GQueue*/
-static void rm_tm_send(GQueue *group, RmTreeMerger *self, gboolean find_original) {
-    GSList *list = NULL;
-    for(GList *iter = group->tail; iter; iter = iter->prev) {
-        list = g_slist_prepend(list, iter->data);
-    }
-    g_queue_free(group);
-
-    if(find_original) {
-        list = rm_shred_group_find_original(self->cfg, list, RM_LINT_TYPE_DUPE_CANDIDATE);
-    }
-    rm_util_thread_pool_push(self->results_pipe, list);
-}
-
 static void rm_tm_extract(RmTreeMerger *self) {
     /* Iterate over all directories per hash (which are same therefore) */
     RmCfg *cfg = self->cfg;
@@ -789,6 +796,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
         if(result_dirs.length >= 2) {
             rm_tm_send(file_adaptor_group, self, FALSE);
         }
+        g_queue_free(file_adaptor_group);
 
         g_queue_clear(&result_dirs);
     }
@@ -834,6 +842,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
                 rm_tm_send(file_list, self, TRUE);
             }
         }
+        g_queue_free(file_list);
     }
 }
 

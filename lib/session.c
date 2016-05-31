@@ -239,99 +239,123 @@ static void rm_session_output_other_lint(const RmSession *session) {
     }
 }
 
-static void rm_session_output_group(GSList *files, RmSession *session, bool merge,
-                                    bool count) {
-    RmFile *file = files->data;
-    if(count && file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-        session->counters->dup_group_counter++;
-    }
+typedef enum RmSessionFileSource {
+    RM_FILE_SOURCE_SHREDDER,
+    RM_FILE_SOURCE_TREEMERGE
+} RmSessionFileSource;
+
+/**
+ * rm_session_output_group outputs a group of files via formats.[ch]
+ * The files may have been received from either rm_session_merge_pipe()
+ * or rm_session_shredder_pipe().
+ * The workflow is:
+ * Non-duplicate files from rm_session_shredder_pipe() are sent directly
+ * to formats.
+ * If the treemerge option is *not* selected, then duplicate files from
+ * rm_session_shredder_pipe() are also sent straight to formats.
+ * If the treemerge option *is* selected, then duplicate files from
+ * rm_session_shredder_pipe() are fed to treemerge, which later returns
+ * the same files as either RM_LINT_TYPE_DUPE_CANDIDATE or
+ * as RM_LINT_TYPE_DUPE_DIR_FILE.  In addition, treemerge sends duplicate
+ * dirs as dummy files of type RM_LINT_TYPE_DUPE_DIR_CANDIDATE.
+ */
+
+/* threadpipe to receive duplicate files and folders from treemerge;
+ */
+static void rm_session_merge_pipe(GSList *files, RmSession *session) {
     for(GSList *iter = files; iter; iter = iter->next) {
-        file = iter->data;
-
-        if(count) {
-            RmCounters *counters = session->counters;
-            if(!RM_IS_BUNDLED_HARDLINK(file)) {
-                counters->shred_files_remaining--;
-                counters->shred_bytes_remaining -= file->file_size - file->hash_offset;
-            }
-
-            if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-                if(!file->is_original) {
-                    session->counters->dup_counter++;
-                    session->counters->duplicate_bytes += file->file_size;
-                    if(!RM_IS_BUNDLED_HARDLINK(file)) {
-                        /* Only check file size if it's not a hardlink.  Since
-                         * deleting hardlinks does not free any space they should
-                         * not be counted unless all of them would be removed.
-                         */
-                        session->counters->total_lint_size += file->file_size;
-                    }
-                } else {
-                    session->counters->original_bytes += file->file_size;
-                }
-            } else {
-                session->counters->unique_bytes += file->file_size;
-            }
-        }
-
-        if(merge) {
-            rm_tm_feed(session->dir_merger, file);
-        } else {
-            /* Hand it over to the printing module */
-            if(file->lint_type != RM_LINT_TYPE_READ_ERROR &&
-               file->lint_type != RM_LINT_TYPE_BASENAME_TWIN) {
-                /* TODO: revisit desired output for RM_LINT_TYPE_READ_ERROR and
-                 * RM_LINT_TYPE_BASENAME_TWIN */
-                rm_fmt_write(file, session->formats, g_slist_length(files));
-            }
-        }
+        /* Hand file over to the printing module */
+        rm_fmt_write((RmFile *)iter->data, session->formats, g_slist_length(files));
     }
     if(!session->cfg->cache_file_structs) {
         g_slist_free_full(files, (GDestroyNotify)rm_file_destroy);
     } else {
         g_slist_free(files);
     }
-}
 
-/* threadpipe to receive duplicate files from treemerge
- */
-static void rm_session_merge_pipe(GSList *files, RmSession *session) {
-    rm_session_output_group(files, session, FALSE, FALSE);
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
 }
 
 /* threadpipe to receive duplicate files and progress updates from shredder
  */
 static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) {
+    RmCounters *counters = session->counters;
     if(buffer->delta_bytes == 0 && !buffer->finished_files) {
         /* special signal for end of shred preprocessing */
+        /* TODO: not sure if we need this any more */
         session->state = RM_PROGRESS_STATE_SHREDDER;
-    }
 
-    if(buffer->delta_bytes != 0) {
-        session->counters->shred_bytes_remaining += buffer->delta_bytes;
-        session->counters->shred_bytes_read -= buffer->delta_bytes;
+    } else if(buffer->delta_bytes != 0) {
+        /* update of bytes (partially) hashed (no finished files) */
+        rm_assert_gentle(!buffer->finished_files);
+        counters->shred_bytes_remaining += buffer->delta_bytes;
+        counters->shred_bytes_read -= buffer->delta_bytes;
 
-        /* fake interrupt option for debugging/testing: */
+        /* maybe do fake interrupt (option for debugging/testing): */
         if(session->state == RM_PROGRESS_STATE_SHREDDER && session->cfg->fake_abort &&
-           session->counters->shred_bytes_remaining * 10 <
-               session->counters->shred_bytes_total * 9) {
+           counters->shred_bytes_remaining * 10 < counters->shred_bytes_total * 9) {
             rm_session_abort();
             /* prevent multiple aborts */
-            session->counters->shred_bytes_total = 0;
+            counters->shred_bytes_total = 0;
+        }
+
+    } else {
+        /* buffer contains finished files...
+
+         * get first file and compute some convenience flags*/
+        RmFile *file = buffer->finished_files->data;
+        gboolean is_dupe_group = file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE;
+        gboolean merge = is_dupe_group && session->cfg->merge_directories;
+        gint files = g_slist_length(buffer->finished_files);
+
+        if(is_dupe_group) {
+            /* increment duplicate file group counter */
+            counters->dup_group_counter++;
+        }
+
+        /* iterate over group, updating counters and forwarding files
+         * to either formats or treemerge */
+        for(GSList *iter = buffer->finished_files; iter; iter = iter->next) {
+            file = iter->data;
+
+            /* update progress counters which exclude hardlink files */
+            if(!RM_IS_BUNDLED_HARDLINK(file)) {
+                counters->shred_files_remaining--;
+                counters->shred_bytes_remaining -= file->file_size - file->hash_offset;
+                if(is_dupe_group) {
+                    counters->total_lint_size += file->file_size;
+                }
+            }
+
+            /* update progress counters which apply to dupes (including
+             * hardlinks) */
+            if(is_dupe_group) {
+                if(file->is_original) {
+                    counters->original_bytes += file->file_size;
+                } else {
+                    counters->dup_counter++;
+                    counters->duplicate_bytes += file->file_size;
+                }
+            } else {
+                counters->unique_bytes += file->file_size;
+            }
+
+            if(merge) {
+                /* feed file to treemerge */
+                rm_tm_feed(session->dir_merger, file);
+            } else {
+                /* Hand file over to the printing module */
+                /* TODO: check this handles RM_LINT_TYPE_READ_ERROR and
+                 * RM_LINT_TYPE_BASENAME_TWIN correctly */
+                rm_fmt_write(file, session->formats, files);
+            }
+        }
+        if(!merge && !session->cfg->cache_file_structs) {
+            g_slist_free_full(buffer->finished_files, (GDestroyNotify)rm_file_destroy);
+        } else {
+            g_slist_free(buffer->finished_files);
         }
     }
-
-    GSList *files = buffer->finished_files;
-    if(files) {
-        rm_assert_gentle(files);
-        RmFile *head = files->data;
-        rm_assert_gentle(head);
-        bool merge = (session->cfg->merge_directories &&
-                      head->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE);
-        rm_session_output_group(files, session, merge, TRUE);
-    }
-
     rm_shred_buffer_free(buffer);
     rm_fmt_set_state(session->formats, session->state);
 }
@@ -361,7 +385,6 @@ int rm_session_run(RmSession *session) {
         rm_mds_new(cfg->read_threads, session->mounts, cfg->fake_pathindex_as_disk);
 
     if(cfg->merge_directories) {
-        rm_assert_gentle(cfg->cache_file_structs);
         session->dir_merger = rm_tm_new(cfg);
     }
 

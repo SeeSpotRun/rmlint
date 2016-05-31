@@ -45,19 +45,7 @@ static RmFmtGroup *rm_fmt_group_new(void) {
     return self;
 }
 
-static void rm_fmt_group_destroy(RmFmtTable *self, RmFmtGroup *group) {
-    RmCfg *cfg = self->session->cfg;
-
-    /* Special case: treemerge.c has to manage memory itself,
-     *               since it omits some files or may even print them twice.
-     */
-    if(cfg->merge_directories == false) {
-        for(GList *iter = group->files.head; iter; iter = iter->next) {
-            RmFile *file = iter->data;
-            rm_file_destroy(file);
-        }
-    }
-
+static void rm_fmt_group_destroy(RmFmtGroup *group) {
     g_queue_clear(&group->files);
     g_slice_free(RmFmtGroup, group);
 }
@@ -324,7 +312,7 @@ void rm_fmt_flush(RmFmtTable *self) {
 void rm_fmt_close(RmFmtTable *self) {
     for(GList *iter = self->groups.head; iter; iter = iter->next) {
         RmFmtGroup *group = iter->data;
-        rm_fmt_group_destroy(self, group);
+        rm_fmt_group_destroy(group);
     }
 
     g_queue_clear(&self->groups);

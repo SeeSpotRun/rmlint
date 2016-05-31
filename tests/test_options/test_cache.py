@@ -26,14 +26,16 @@ def check(data, write_cache):
     unfinished = [p['path'] for p in data if p['type'] == 'unfinished_cksum']
     dupe_files = [p['path'] for p in data if p['type'] == 'duplicate_file']
     dupe_trees = [p['path'] for p in data if p['type'] == 'duplicate_dir']
+    dupe_dir_files = [p['path'] for p in data if p['type'] == 'duplicate_dir_file']
 
     path_in = lambda name, paths: os.path.join(TESTDIR_NAME, name) in paths
 
     if write_cache:
-        assert len(unfinished) == 3
+        assert len(unfinished) == 1
         assert path_in('1.b', unfinished)
-        assert path_in('dir_a/1', unfinished)
-        assert path_in('dir_b/1', unfinished)
+        assert len(dupe_dir_files) == 2
+        assert path_in('dir_a/1', dupe_dir_files)
+        assert path_in('dir_b/1', dupe_dir_files)
 
     assert len(dupe_trees) == 2
     assert path_in('dir_a', dupe_trees)

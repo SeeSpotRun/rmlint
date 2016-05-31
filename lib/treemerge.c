@@ -99,7 +99,7 @@ struct RmTreeMerger {
     GHashTable *file_groups;   /* Group files by hash                                 */
     GHashTable *file_checks;   /* Set of files that were handled already.             */
     GHashTable *known_hashs;   /* Set of known hashes, only used for cleanup.         */
-    GQueue *free_list;         /* List of RmFiles that will be free'd at the end.     */
+    GQueue *free_list;         /* List of directory-as-RmFiles to free at end.        */
     GQueue valid_dirs;         /* Directories consisting of RmFiles only              */
     GThreadPool *results_pipe; /* GThreadPool to send finished groups                 */
 };
@@ -513,7 +513,7 @@ void rm_tm_destroy(RmTreeMerger *self) {
 
     rm_trie_destroy(&self->dir_tree);
     rm_trie_destroy(&self->count_tree);
-    g_queue_free(self->free_list);
+    g_queue_free_full(self->free_list, g_free);
 
     g_slice_free(RmTreeMerger, self);
 }
@@ -556,7 +556,6 @@ void rm_tm_feed(RmTreeMerger *self, RmFile *file) {
         g_free(dirname);
     }
 
-    g_queue_push_tail(self->free_list, file);
     rm_directory_add(directory, file);
 
     /* Add the file to this directory */
@@ -773,8 +772,10 @@ static void rm_tm_extract(RmTreeMerger *self) {
         for(GList *iter = result_dirs.head; iter; iter = iter->next) {
             RmDirectory *directory = iter->data;
             RmFile *mask = rm_directory_as_new_file(self, directory);
-            g_queue_push_tail(self->free_list, mask);
             g_queue_push_tail(file_adaptor_group, mask);
+            /* keep track of our directory-as-files so we can free during
+             * rm_tm_destroy: */
+            g_queue_push_tail(self->free_list, mask);
 
             if(iter == result_dirs.head) {
                 /* First one in the group -> It's the original */

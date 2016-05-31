@@ -325,11 +325,12 @@ static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) 
         for(GSList *iter = buffer->finished_files; iter; iter = iter->next) {
             file = iter->data;
 
+            RM_DEFINE_PATH(file);
             /* update progress counters which exclude hardlink files */
             if(!RM_IS_BUNDLED_HARDLINK(file)) {
                 counters->shred_files_remaining--;
                 counters->shred_bytes_remaining -= file->file_size - file->hash_offset;
-                if(is_dupe_group) {
+                if(is_dupe_group && !file->is_original) {
                     counters->total_lint_size += file->file_size;
                 }
             }

@@ -306,6 +306,7 @@ void rm_fmt_flush(RmFmtTable *self) {
     for(GList *iter = self->groups.head; iter; iter = iter->next) {
         RmFmtGroup *group = iter->data;
         g_queue_foreach(&group->files, (GFunc)rm_fmt_write_impl, self);
+        g_queue_foreach(&group->files, (GFunc)rm_file_destroy, NULL);
     }
 }
 

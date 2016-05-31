@@ -606,6 +606,10 @@ typedef enum RmShredAddMode {
     RM_SHRED_CONTINUING
 } RmShredAddMode;
 
+#define RM_SHRED_NEEDS_HASHING(node, cfg) \
+    (rm_shred_node_qualifies(node) &&     \
+     (node->num_inodes > 1 || cfg->merge_directories) && !node->final)
+
 /** rm_shred_node_add_file adds a file to the node.
  * If mode==RM_SHRED_HOLD then the file is stored in the node
  * If mode==RM_SHRED_SIFT then the node is tested via rm_shred_node_qualifies()
@@ -617,7 +621,6 @@ typedef enum RmShredAddMode {
  *
  * Call with tree node->tree locked.
  **/
-
 static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, RmShredAddMode mode) {
     file->shred_node = node;
 
@@ -650,8 +653,7 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, RmShredAddMo
     node->has_only_ext_cksums &= file->has_ext_cksum;
 
     /* check whether to send for further hashing, or store in the node */
-    if(mode != RM_SHRED_HOLD && rm_shred_node_qualifies(node) && !node->final &&
-       node->num_inodes > 1) {
+    if(mode != RM_SHRED_HOLD && RM_SHRED_NEEDS_HASHING(node, cfg)) {
         file->shred_overshot = FALSE;
         rm_shred_node_launch_held(node);
 
@@ -800,7 +802,7 @@ static void rm_shred_tree_launch(RmShredTree *tree) {
     RmShredNode *node = &tree->head;
     g_mutex_lock(&tree->lock);
     {
-        if(rm_shred_node_qualifies(node) && node->num_inodes > 1 && !node->final) {
+        if(RM_SHRED_NEEDS_HASHING(node, tree->shredder->cfg)) {
             rm_shred_node_launch_held(node);
         }
         finished = rm_shred_node_finished(node, NULL, FALSE);

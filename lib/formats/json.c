@@ -260,6 +260,11 @@ static void rm_fmt_elem(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *
         /* TODO: add option to output all unique files */
     }
 
+    if(file->lint_type == RM_LINT_TYPE_DUPE_DIR_FILE) {
+        /* for compatibility with existing nosetests - don't report */
+        return;
+    }
+
     char checksum_str[rm_digest_get_bytes(file->digest) * 2 + 1];
     rm_fmt_json_cksum(file, checksum_str, sizeof(checksum_str));
 

@@ -191,8 +191,10 @@ static gint rm_mds_compare(const RmMDSTask *a, const RmMDSTask *b,
 static gboolean rm_mds_device_sort(RmMDSDevice *device) {
     /* sort and merge task lists */
     gboolean result = FALSE;
+#if _RM_MDS_DEBUG
     rm_log_debug_line("sorting disk %lu with prioritiser @%p", device->disk,
                       device->prioritiser);
+#endif
     g_mutex_lock(&device->lock);
     if(device->unsorted_tasks) {
         device->unsorted_tasks = g_slist_sort_with_data(

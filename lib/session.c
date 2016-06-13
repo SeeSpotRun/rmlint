@@ -135,16 +135,14 @@ static int rm_session_replay(RmSession *session) {
  * single threaded; assumes safe access to tables->all_files
  * and session->counters.
  */
-static void rm_session_traverse_pipe(RmTraverseFile *file, RmSession *session) {
-    if(rm_mounts_is_evil(session->mounts, file->dev)
-       /* A file in an evil fs. Ignore. */
-       ||
-       rm_fmt_is_a_output(session->formats, file->path)
-       /* ignore files which are rmlint outputs */
-       ||
-       (file->lint_type == RM_LINT_TYPE_EMPTY_FILE && !session->cfg->find_emptyfiles)
-       /* ignoring empty files */
-       ||
+static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
+    if(!file) {
+        session->counters->ignored_files++;
+        return;
+    }
+
+    if(file->lint_type == RM_LINT_TYPE_OTHER ||
+       (file->lint_type == RM_LINT_TYPE_EMPTY_FILE && !session->cfg->find_emptyfiles) ||
        file->lint_type == RM_LINT_TYPE_BADPERM ||
        file->lint_type == RM_LINT_TYPE_WRONG_SIZE ||
        file->lint_type == RM_LINT_TYPE_HIDDEN_FILE) {
@@ -152,29 +150,18 @@ static void rm_session_traverse_pipe(RmTraverseFile *file, RmSession *session) {
     } else if(file->lint_type == RM_LINT_TYPE_HIDDEN_DIR) {
         session->counters->ignored_folders++;
     } else {
-        RmFile *real = rm_file_new(session->cfg, file->path, file->size, file->dev,
-                                   file->inode, file->mtime, file->lint_type,
-                                   file->is_prefd, file->path_index, file->depth);
-
-        if(!real) {
-            session->counters->ignored_files++;
-        } else {
-            real->is_symlink = file->is_symlink;
-            real->is_hidden = file->is_hidden;
-            if(session->cfg->clear_xattr_fields &&
-               real->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-                rm_xattr_clear_hash(session->cfg, real);
-            }
-            session->tables->all_files =
-                g_slist_prepend(session->tables->all_files, real);
-
-            session->counters->total_files++;
-            session->counters->shred_bytes_remaining +=
-                real->file_size - real->hash_offset;
-            rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+        if(session->cfg->clear_xattr_fields &&
+           file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+            rm_xattr_clear_hash(session->cfg, file);
         }
+        session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
+
+        session->counters->total_files++;
+        session->counters->shred_bytes_remaining += file->file_size - file->hash_offset;
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+        return;
     }
-    rm_traverse_file_destroy(file);
+    rm_file_destroy(file);
 }
 
 /* threadpipe to receive "other" lint and rejected files from preprocess.
@@ -402,7 +389,8 @@ int rm_session_run(RmSession *session) {
     GThreadPool *traverse_file_pool =
         rm_util_thread_pool_new((GFunc)rm_session_traverse_pipe, session, 1, TRUE);
 
-    rm_traverse_tree(session->cfg, traverse_file_pool, session->mds);
+    rm_traverse_tree(session->cfg, traverse_file_pool, session->mds, session->formats,
+                     session->mounts);
     rm_log_debug_line("Traversal finished at %.3f",
                       g_timer_elapsed(session->timer, NULL));
 

@@ -36,7 +36,11 @@
 
 /* types of lint */
 typedef enum RmLintType {
+    /* ---- guard against uninitialised values: */
     RM_LINT_TYPE_UNKNOWN = 0,
+
+    /* ---- reportable 'other lint';
+     * freed by formats.c */
     RM_LINT_TYPE_BADLINK,
     RM_LINT_TYPE_EMPTY_DIR,
     RM_LINT_TYPE_EMPTY_FILE,
@@ -44,44 +48,91 @@ typedef enum RmLintType {
     RM_LINT_TYPE_BADUID,
     RM_LINT_TYPE_BADGID,
     RM_LINT_TYPE_BADUGID,
-    /* dummy types ignored by traverser (used for counting) */
-    RM_LINT_TYPE_OTHER,  // must be first, used as marker
-    RM_LINT_TYPE_BADPERM,
-    RM_LINT_TYPE_WRONG_SIZE,
-    RM_LINT_TYPE_HIDDEN_DIR,
-    RM_LINT_TYPE_HIDDEN_FILE,
-    RM_LINT_TYPE_WRONG_TIME,
-    RM_LINT_TYPE_KEEP_TAGGED,
-    RM_LINT_TYPE_PATHDOUBLE,
-    RM_LINT_TYPE_HARDLINK,
-    RM_LINT_TYPE_READ_ERROR,
-    RM_LINT_TYPE_BASENAME_TWIN,
+    /* sentinel for 'other' lint: */
+    RM_LINT_TYPE_LAST_OTHER = RM_LINT_TYPE_BADUGID,
 
-    /* note: this needs to be after all non-duplicate lint type item in list */
-    RM_LINT_TYPE_DUPE_CANDIDATE,
+    /* types used by shredder for dupe match reporting;
+     * may be modified by treemerge;
+     * freed by formats.c */
+    RM_LINT_GROUP_DUPE_FILES = 0x10,
+    RM_LINT_TYPE_DUPE_CANDIDATE, /* candidate for duplicate search */
+    RM_LINT_TYPE_DUPE_FILE,      /* confirmed duplicate */
+    RM_LINT_TYPE_DUPE_DIR_FILE,  /* file within a duplicate dir; must
+                                    come after RM_LINT_TYPE_DUPE_FILE */
+    RM_LINT_TYPE_UNIQUE_FILE,    /* candidate which didn't match*/
 
-    /* Directories are no "normal" RmFiles, they are actual
-     * different structs that hide themselves as RmFile to
-     * be compatible with the output system.
-     *
-     * Also they only appear at the very end of processing temporarily.
-     * So it does not matter if this type is behind RM_LINT_TYPE_DUPE_CANDIDATE.
-     */
-    RM_LINT_TYPE_DUPE_DIR_CANDIDATE,
+    /* types used by session.c for emptydir detection
+     * and by treemerge for dupe dir detection;
+     * empty dirs freed by formats.c;
+     * the rest freed by treemerge.c */
+    RM_LINT_GROUP_DUPE_DIRS = 0x20,
+    RM_LINT_TYPE_DIR,         /* dir encountered during traverse */
+    RM_LINT_TYPE_DUPE_DIR_CANDIDATE,    /* duplicate dir */
+    RM_LINT_TYPE_UNIQUE_DIR,  /* unmatched dir */
+    RM_LINT_TYPE_DUPE_SUBDIR, /* subdir of dupe dir */
 
-    /* file within a duplicate dir */
-    RM_LINT_TYPE_DUPE_DIR_FILE,
+    /* Files skipped during traversal; these count +1 towards
+     * parent dir file count (for emptydir and dupe dir detection).
+     * not sent to output; freed by session.c during traversal */
+    RM_LINT_GROUP_SINGLE_SKIP = 0x40,
+    RM_LINT_TYPE_WRONG_SIZE,   // file ignored due to size limits
+    RM_LINT_TYPE_BADPERM,      // no, it's not a 1980's reference!
+                               // file ignored due to permission limits.
+                               // (TODO: do we also need BADPERM_DIR ?)
+    RM_LINT_TYPE_OVERCLAMPED,  // file smaller than clamp range
+    RM_LINT_TYPE_WRONG_TIME,   // file ignored due to mtime limits
+    RM_LINT_TYPE_HIDDEN_FILE,  // hidden file ignored due to settings
+    RM_LINT_TYPE_SYMLINK,      // symlink not 'seen' due to settings
+    RM_LINT_TYPE_EVIL_FILE,    // file on evil fs
+    RM_LINT_TYPE_NO_STAT,      // file ignored because unable to stat
+    RM_LINT_TYPE_OUTPUT,       // a file which is an output of rmlint
+    RM_LINT_TYPE_UNHANDLED,    // a file whose stat.st_mode not handled by walk.c
 
-    /* Special type for files that got sieved out during shreddering.
-     * if cfg->write_unfinished is true, those may be included in the
-     * json/xattr/csv output.
-     *
-     * This is mainly useful for caching.
-     */
-    RM_LINT_TYPE_UNIQUE_FILE,
-    /* Files that were buffered when shredder was interrupted */
-    RM_LINT_TYPE_INTERRUPTED,
+    /* dirs skipped during traversal; these contribute unknown count
+     * to parent dir file */
+    RM_LINT_GROUP_MULTI_SKIP = 0x80,
+    RM_LINT_TYPE_HIDDEN_DIR,      // hidden file ignored due to settings
+    RM_LINT_TYPE_MAX_DEPTH,       // recursing into folder would exceed max depth
+    RM_LINT_TYPE_XDEV,            // recursing into folder would cross mountpoint
+    RM_LINT_TYPE_EVIL_DIR,        // dir on evil fs
+    RM_LINT_TYPE_GOODLINK,        // symlink that we didn't follow
+    RM_LINT_TYPE_TRAVERSE_ERROR,  // other traversal error
+
+    /* objects skipped during traversal that don't impact emptydir status */
+    RM_LINT_GROUP_ZERO_SKIP = 0x100,
+    RM_LINT_TYPE_CYCLIC,
+    RM_LINT_TYPE_WHITEOUT,  // file ignored due to whiteout
+
+    /* files rejected during preprocessing, dupe matching or postprocessing;
+     * non-reporting;
+     * freed by session.c */
+    RM_LINT_GROUP_REJECTS = 0x200,
+    RM_LINT_TYPE_PATHDOUBLE,     // path double detected during preprocessing
+    RM_LINT_TYPE_HARDLINK,       // hardlink rejected during preprocessing
+    RM_LINT_TYPE_READ_ERROR,     // read error during duplicate search
+    RM_LINT_TYPE_BASENAME_TWIN,  // rejected post-dupe-search due to --unmatched-basename
+    RM_LINT_TYPE_INTERRUPTED,    // dupe search interrupted eg by ctrl-c
 } RmLintType;
+
+#define RM_IS_OTHER_LINT_TYPE(type) (type <= RM_LINT_TYPE_LAST_OTHER)
+
+#define RM_IS_DUPE_FILE_SEARCH_TYPE(type) ((type & RM_LINT_GROUP_DUPE_FILES) != 0)
+
+#define RM_IS_DUPE_DIR_SEARCH_TYPE(type) ((type & RM_LINT_GROUP_DUPE_DIRS) != 0)
+
+#define RM_IS_DIR_TYPE(type) \
+    (RM_IS_DUPE_DIR_SEARCH_TYPE(type) || type == RM_LINT_TYPE_EMPTY_DIR)
+
+/* single files for purpose of counting number of files in dir */
+#define RM_IS_COUNTED_FILE_TYPE(type)                                   \
+    ((RM_IS_OTHER_LINT_TYPE(type) && type != RM_LINT_TYPE_EMPTY_DIR) || \
+     RM_IS_DUPE_FILE_SEARCH_TYPE(type) || ((type & RM_LINT_GROUP_SINGLE_SKIP) != 0))
+
+#define RM_IS_UNTRAVERSED_TYPE(type) ((type & RM_LINT_GROUP_MULTI_SKIP) != 0)
+
+#define RM_IS_REPORTING_TYPE(type)                                       \
+    (RM_IS_OTHER_LINT_TYPE(type) || RM_IS_DUPE_FILE_SEARCH_TYPE(type) || \
+     RM_IS_DUPE_DIR_SEARCH_TYPE(type))
 
 struct RmSession;
 
@@ -105,8 +156,10 @@ typedef guint16 RmPatternBitmask;
  */
 
 typedef struct RmFile {
-    /* path 'zipped' as a node of folder n-ary tree (memory efficient
-     * but slower) */
+    char *bname;
+
+    /* parent dir path 'zipped' as a node of folder n-ary tree
+     * (memory efficient but slower) */
     RmNode *folder;
 
     /* File modification date/time
@@ -135,6 +188,11 @@ typedef struct RmFile {
      */
     bool is_symlink : 1;
 
+    /* True if traversal followed a symlink on the way to finding file;
+     * this may mean the file is a symlink target, or in a dir that
+     * was a symlink target, etc */
+    bool via_symlink : 1;
+
     /* True if this file is in one of the preferred paths,
      * i.e. paths prefixed with // on the commandline.
      * In the case of hardlink clusters, the head of the cluster
@@ -158,11 +216,6 @@ typedef struct RmFile {
      * This is relevant to --partial-hidden.
      */
     bool is_hidden : 1;
-
-    /* If true, the checksum of this file was read from the xattrs of the file.
-     * It was cached previously by rmlint on the disk.
-     */
-    bool has_ext_cksum : 1;
 
     /* If true, the file will be request to be pre-cached on the next read */
     bool fadvise_requested : 1;
@@ -197,13 +250,18 @@ typedef struct RmFile {
      */
     RmDigest *digest;
 
+    /* The checksum of this file read from the xattrs of the file, if available.
+     * It was stored there previously by rmlint.
+     */
+    char *ext_cksum;
+
     /* Those are never used at the same time.
      * disk_offset is used during computation,
      * twin_count during output.
      */
     union {
         /* Count of twins of this file.
-         * (i.e. length of group of this file)
+         * (i.e. length of group of this file); used during output
          */
         gint64 twin_count;
 
@@ -216,7 +274,8 @@ typedef struct RmFile {
      */
     RmLintType lint_type;
 
-    /* Link to the RmShredNode that the file currently belongs to */
+    /* Link to the RmShredNode that the file currently belongs to
+     * (for duplicate file candidates only) */
     struct RmShredNode *shred_node;
 
     /* Required for rm_file_equal and for RM_DEFINE_PATH */
@@ -232,6 +291,57 @@ typedef struct RmFile {
     RmPatternBitmask pattern_bitmask_path;
     RmPatternBitmask pattern_bitmask_basename;
 } RmFile;
+
+typedef enum RmTraversalType {
+    RM_TRAVERSAL_NONE = 0,
+    RM_TRAVERSAL_PART,
+    RM_TRAVERSAL_FULL
+} RmTraversalType;
+
+/* struct for all dirs traversed */
+typedef struct RmDirInfo {
+    /* initially true; set false if we traversed to this dir without
+     * passing through any hidden folders
+     * note: hidden dirs passed explicitly to command line do not count
+     * as hidden)
+     */
+    bool hidden;
+
+    /* initially true; set false if we traversed to this dir without
+     * following any symlinks;
+     */
+    bool via_symlink;
+
+    /* note: during traversal, the following counters and flags
+     * exclude subdirs.  At the end of traversal they are integrated
+     * up to give cumulative values for the dir + subdirs
+     */
+
+    /* file count (including traversal errors and ignored files) */
+    gint file_count;
+
+    /* duplicate count */
+    gint dupe_count;
+
+    /* whether we found another RmDirInfo with same count */
+    gboolean has_count_match;
+
+    /* duplicate UID's and count */
+    GHashTable *dupe_IDs;
+    gint dupe_ID_count;
+
+    /* set true if we didn't traverse all subdirs
+     */
+    RmTraversalType traversal;
+
+    /* during traversal, create and RmFile for the dir as possible emptydir */
+    RmFile *dir_as_file;
+
+} RmDirInfo;
+
+RmDirInfo *rm_dir_info_new(RmTraversalType traversal);
+
+void rm_dir_info_free(RmDirInfo *info);
 
 /* Defines a path variable containing the file's path */
 #define RM_DEFINE_PATH_IF_NEEDED(file, needed)           \
@@ -251,7 +361,7 @@ typedef struct RmFile {
  */
 RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
                     ino_t inode, time_t mtime, RmLintType type, bool is_ppath,
-                    unsigned pnum, short depth);
+                    unsigned path_index, short depth);
 
 /**
  * @brief Deallocate the memory allocated by rm_file_new.

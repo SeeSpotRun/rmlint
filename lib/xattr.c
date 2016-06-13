@@ -160,7 +160,7 @@ int rm_xattr_write_hash(RmCfg *cfg, RmFile *file) {
     rm_assert_gentle(cfg);
 
 #if HAVE_XATTR
-    if(file->has_ext_cksum || cfg->write_cksum_to_xattr == false) {
+    if(file->ext_cksum || cfg->write_cksum_to_xattr == false) {
         return EINVAL;
     }
 
@@ -210,9 +210,6 @@ char *rm_xattr_read_hash(RmCfg *cfg, RmFile *file) {
         rm_xattr_clear_hash(cfg, file);
         return NULL;
     }
-
-    /* remember, this file is special. A unicorn amongst files. */
-    file->has_ext_cksum = true;
 
     return g_strdup(cksum_hex_str);
 #else

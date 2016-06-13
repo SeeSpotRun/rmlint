@@ -30,7 +30,7 @@
 #include "config.h"
 #include "formats.h"
 #include "md-scheduler.h"
-#include "preprocess.h"
+#include "pathtricia.h"
 #include "preprocess.h"
 #include "replay.h"
 #include "session.h"
@@ -47,6 +47,18 @@ void rm_session_init(RmSession *session) {
     session->counters = g_slice_new0(RmCounters);
     session->formats = rm_fmt_open(session);
     session->tables = rm_file_tables_new();
+}
+
+static int rm_session_clear_node(_UNUSED RmTrie *trie, RmNode *node, _UNUSED int level,
+                                 _UNUSED void *user_data) {
+    RmDirInfo *info = node->data;
+    if(info) {
+        if(info->dir_as_file) {
+            rm_file_destroy(info->dir_as_file);
+        }
+        rm_dir_info_free(info);
+    }
+    return 0;
 }
 
 void rm_session_clear(RmSession *session) {
@@ -79,6 +91,8 @@ void rm_session_clear(RmSession *session) {
     }
 
     g_queue_clear(&session->cfg->replay_files);
+    rm_trie_iter(&cfg->file_trie, cfg->file_trie.root, FALSE, TRUE,
+                 (RmTrieIterCallback)rm_session_clear_node, NULL);
     rm_trie_destroy(&cfg->file_trie);
 
     g_slice_free(RmCounters, session->counters);
@@ -131,37 +145,106 @@ static int rm_session_replay(RmSession *session) {
     return EXIT_SUCCESS;
 }
 
+static void rm_session_add_file(RmFile *file, RmSession *session) {
+    session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
+    session->counters->total_files++;
+    session->counters->shred_bytes_remaining += file->file_size - file->hash_offset;
+    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+}
+
 /* threadpipe to receive files from traverser.
  * single threaded; assumes safe access to tables->all_files
  * and session->counters.
  */
 static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
-    if(!file) {
-        session->counters->ignored_files++;
+    rm_assert_gentle(file);
+
+    RmLintType lint_type = file->lint_type;
+    if(lint_type == RM_LINT_TYPE_DIR) {
+        /* create pathtricia data entry for dir */
+        RmNode *node = file->folder;
+        rm_assert_gentle(node);
+        if(!node->data) {
+            node->data = rm_dir_info_new(RM_TRAVERSAL_FULL);
+        }
+        RmDirInfo *dirinfo = node->data;
+        dirinfo->hidden &= file->is_hidden;
+        dirinfo->via_symlink &= file->via_symlink;
+        rm_assert_gentle(!dirinfo->dir_as_file);
+        dirinfo->dir_as_file = file;
         return;
     }
 
-    if(file->lint_type == RM_LINT_TYPE_OTHER ||
-       (file->lint_type == RM_LINT_TYPE_EMPTY_FILE && !session->cfg->find_emptyfiles) ||
-       file->lint_type == RM_LINT_TYPE_BADPERM ||
-       file->lint_type == RM_LINT_TYPE_WRONG_SIZE ||
-       file->lint_type == RM_LINT_TYPE_HIDDEN_FILE) {
-        session->counters->ignored_files++;
-    } else if(file->lint_type == RM_LINT_TYPE_HIDDEN_DIR) {
-        session->counters->ignored_folders++;
-    } else {
-        if(session->cfg->clear_xattr_fields &&
-           file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-            rm_xattr_clear_hash(session->cfg, file);
+    /* add file towards parent dir's file count */
+    RmNode *parent = file->folder;
+    rm_assert_gentle(parent);
+    RmDirInfo *parent_info = parent->data;
+    if(parent_info) {
+        if(RM_IS_COUNTED_FILE_TYPE(lint_type)) {
+            parent_info->file_count++;
         }
-        session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
+        if(RM_IS_UNTRAVERSED_TYPE(lint_type)) {
+            parent_info->traversal = RM_TRAVERSAL_PART;
+        }
+    }
 
-        session->counters->total_files++;
-        session->counters->shred_bytes_remaining += file->file_size - file->hash_offset;
-        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+    RmCfg *cfg = session->cfg;
+    if(lint_type == RM_LINT_TYPE_HIDDEN_DIR) {
+        /* ignored hidden dir */
+        session->counters->ignored_folders++;
+    } else if(!RM_IS_REPORTING_TYPE(lint_type)) {
+        /* info only; ignore */
+        session->counters->ignored_files++;
+    } else if(lint_type == RM_LINT_TYPE_EMPTY_FILE && !cfg->find_emptyfiles) {
+        /* ignoring empty files */
+        session->counters->ignored_files++;
+    } else {
+        if(cfg->clear_xattr_fields && lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+            rm_xattr_clear_hash(cfg, file);
+        }
+        rm_session_add_file(file, session);
         return;
     }
     rm_file_destroy(file);
+}
+
+/**
+ * rm_session_find_emptydirs is a bottom-up iterator over trie to find
+ * empty dirs.
+ * TODO: could maybe do this after 'removing' other lint so that
+ * dirs containing only removable lint are classified as 'empty'*/
+static int rm_session_find_emptydirs(_UNUSED RmTrie *self, RmNode *node,
+                                     _UNUSED int level, RmSession *session) {
+    RmDirInfo *info = node->data;
+    if(info == NULL) {
+        /* dir was not traversed */
+        return 0;
+    }
+    RmFile *file = info->dir_as_file;
+    rm_assert_gentle(file);
+    rm_assert_gentle(file->lint_type == RM_LINT_TYPE_DIR);
+
+    if(info->file_count == 0 && info->traversal == RM_TRAVERSAL_FULL) {
+        /* steal the 'file' */
+        info->dir_as_file = NULL;
+        file->lint_type = RM_LINT_TYPE_EMPTY_DIR;
+        /* add to list */
+        rm_session_add_file(file, session);
+        rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
+    } else {
+        /* not emptydir; add file counts to parent's file count */
+        RmNode *parent = node->parent;
+        if(!parent || !parent->data) {
+            /* parent was not traversed */
+            return 0;
+        }
+        RmDirInfo *parent_info = parent->data;
+        parent_info->file_count += 0;
+        info->file_count += 0;
+        parent_info->file_count += info->file_count;
+        parent_info->traversal = MIN(parent_info->traversal, info->traversal);
+    }
+    return 0;
 }
 
 /* threadpipe to receive "other" lint and rejected files from preprocess.
@@ -181,7 +264,7 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
         if(!session->cfg->cache_file_structs) {
             rm_file_destroy(file);
         }
-    } else if(file->lint_type >= RM_LINT_TYPE_OTHER) {
+    } else if(file->lint_type >= RM_LINT_TYPE_LAST_OTHER) {
         rm_assert_gentle(file->lint_type <= RM_LINT_TYPE_DUPE_CANDIDATE);
         /* filtered reject based on mtime, --keep, etc */
         rm_file_destroy(file);
@@ -201,7 +284,7 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
 static void rm_session_output_other_lint(const RmSession *session) {
     RmFileTables *tables = session->tables;
 
-    for(RmOff type = 0; type < RM_LINT_TYPE_OTHER; ++type) {
+    for(RmOff type = 0; type <= RM_LINT_TYPE_LAST_OTHER; ++type) {
         if(type == RM_LINT_TYPE_EMPTY_DIR) {
             /* sort empty dirs in reverse so that they can be deleted sequentially */
             tables->other_lint[type] = g_slist_sort(
@@ -218,7 +301,7 @@ static void rm_session_output_other_lint(const RmSession *session) {
             rm_fmt_write(file, session->formats, -1);
         }
 
-        if(!session->cfg->cache_file_structs) {
+        if(!session->cfg->cache_file_structs && FALSE) {
             g_slist_free_full(list, (GDestroyNotify)rm_file_destroy);
         } else {
             g_slist_free(list);
@@ -402,6 +485,12 @@ int rm_session_run(RmSession *session) {
         "hidden folders",
         g_timer_elapsed(session->timer, NULL), session->counters->total_files,
         session->counters->ignored_files, session->counters->ignored_folders);
+
+    /* find empty dirs by iterating up through trie */
+    if(cfg->find_emptydirs) {
+        rm_trie_iter(&cfg->file_trie, cfg->file_trie.root, FALSE, TRUE,
+                              (RmTrieIterCallback)rm_session_find_emptydirs, session);
+    }
 
     /* --- Preprocessing --- */
 

@@ -46,6 +46,7 @@ typedef struct RmTravSession {
 // ACTUAL WORK HERE //
 //////////////////////
 
+
 static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
                              RmLintType lint_type, gboolean check_output,
                              gboolean check_perms) {
@@ -54,7 +55,7 @@ static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
 
     /*TODO: this is double-up of rm_traverse_reg() */
     if(check_output && rm_fmt_is_a_output(traverser->formats, walkfile->path)) {
-        lint_type = RM_LINT_TYPE_OTHER;
+        lint_type = RM_LINT_TYPE_OUTPUT;
     } else if(check_perms) {
         RmLintType gid_check;
         if(cfg->permissions && access(walkfile->path, cfg->permissions) == -1) {
@@ -68,13 +69,13 @@ static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
 
     gboolean is_prefd = (walkfile->index >= cfg->first_prefd);
 
-    if(lint_type < RM_LINT_TYPE_OTHER && cfg->keep_all_tagged && is_prefd) {
+    if(lint_type <= RM_LINT_TYPE_LAST_OTHER && cfg->keep_all_tagged && is_prefd) {
         /* we can't delete 'other lint' in tagged folders */
         lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
     }
 
     int mtime = rm_sys_stat_mtime_seconds(walkfile->statp);
-    if(lint_type != RM_LINT_TYPE_DUPE_CANDIDATE) {
+    if(lint_type != RM_LINT_TYPE_DUPE_CANDIDATE && lint_type != RM_LINT_TYPE_DIR) {
         /* some filtering criteria that don't apply to dupe candidates
          * since they might be valid "originals" */
         if(cfg->filter_mtime && mtime < cfg->min_mtime) {
@@ -82,29 +83,19 @@ static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
         }
     }
 
-    if(!traverser->symlink_message_delivered && walkfile->via_symlink) {
-        rm_log_debug_line(
-            "Following symlink %s\n"
-            "\t(further symlink messages suppressed)",
-            walkfile->path);
-        traverser->symlink_message_delivered = TRUE;
-    }
-
     RmFile *file = rm_file_new(traverser->cfg, walkfile->path, walkfile->statp->st_size,
-                               walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
-                               lint_type, is_prefd, walkfile->index, walkfile->depth);
-
+                           walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
+                           lint_type, is_prefd, walkfile->index, walkfile->depth);
     rm_assert_gentle(file);
-    if(file) {
-        file->is_hidden = walkfile->is_hidden;
-        file->is_symlink = walkfile->is_symlink;
-        rm_util_thread_pool_push(traverser->result_pipe, file);
-    }
+    file->is_hidden = walkfile->is_hidden;
+    file->via_symlink = walkfile->via_symlink;
+    file->is_symlink = walkfile->is_symlink;
+    rm_util_thread_pool_push(traverser->result_pipe, file);
 }
 
 static void rm_traverse_reg(RmWalkFile *walkfile, RmTravSession *traverser) {
     if(rm_fmt_is_a_output(traverser->formats, walkfile->path)) {
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, FALSE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OUTPUT, FALSE, FALSE);
         return;
     }
 
@@ -149,26 +140,20 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
         rm_traverse_reg(walkfile, traverser);
         break;
     case RM_WALK_DIR:
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_DIR, FALSE, TRUE);
         break;
     case RM_WALK_SL:
         if(!cfg->see_symlinks) {
-            if(!traverser->symlink_message_delivered && walkfile->depth > 0) {
-                rm_log_debug_line(
-                    "Not following symlink %s because of cfg\n"
-                    "\t(further symlink messages suppressed for this session)",
-                    walkfile->path);
-                traverser->symlink_message_delivered = TRUE;
-            }
-            /* may need to account for file for empty dir and dupe dir detection */
-            rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, TRUE, TRUE);
+            /* not following link but need to account for it for
+             * empty dir and dupe dir detection */
+            rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_GOODLINK, TRUE, TRUE);
         }
         break;
     case RM_WALK_DOT:
         rm_assert_gentle_not_reached();
         break;
     case RM_WALK_OTHER:
-        rm_log_error_line(_("Unhandled file type for file %s"), walkfile->path);
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, TRUE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_UNHANDLED, FALSE, TRUE);
         break;
     case RM_WALK_BADLINK:
         rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_BADLINK, FALSE, TRUE);
@@ -180,42 +165,32 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
         rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_HIDDEN_DIR, FALSE, FALSE);
         break;
     case RM_WALK_WHITEOUT:
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, FALSE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_WHITEOUT, FALSE, FALSE);
         break;
     case RM_WALK_SKIPPED_ROOT:
-        rm_log_info_line("Not descending into %s because it is a root path",
-                         walkfile->path);
+        /* TODO: maybe debug report */
         break;
     case RM_WALK_MAX_DEPTH:
-        rm_log_debug_line("Not descending into %s because max depth reached",
-                          walkfile->path);
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, FALSE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_MAX_DEPTH, FALSE, FALSE);
         break;
     case RM_WALK_XDEV:
-        rm_log_info_line("Not descending into %s because it is a different filesystem",
-                         walkfile->path);
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, FALSE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_XDEV, FALSE, FALSE);
         break;
     case RM_WALK_EVILFS:
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, TRUE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_EVIL_DIR, FALSE, TRUE);
         break;
     case RM_WALK_DC:
-        rm_log_warning_line(_("filesystem loop detected at %s (skipping)"),
-                            walkfile->path);
+        /* TODO: maybe debug report */
         break;
     case RM_WALK_PATHMAX:
         /* TODO: maybe debug report */
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, FALSE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_TRAVERSE_ERROR, FALSE, FALSE);
         break;
     case RM_WALK_DNR:
-        rm_log_warning_line(_("cannot read directory %s: %s"), walkfile->path,
-                            g_strerror(walkfile->err));
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, FALSE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_TRAVERSE_ERROR, FALSE, FALSE);
         break;
     case RM_WALK_NS:
-        rm_log_warning_line(_("cannot stat file %s (skipping): %s"), walkfile->path,
-                            g_strerror(walkfile->err));
-        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_OTHER, FALSE, FALSE);
+        rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_TRAVERSE_ERROR, FALSE, FALSE);
         break;
     default:
         rm_assert_gentle_not_reached();

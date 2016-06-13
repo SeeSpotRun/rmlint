@@ -650,7 +650,7 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, RmShredAddMo
     node->has_pref |= file->is_prefd || file->hardlinks.has_prefd;
     node->has_npref |= (!file->is_prefd) || file->hardlinks.has_non_prefd;
     node->has_new |= file->is_new_or_has_new;
-    node->has_only_ext_cksums &= file->has_ext_cksum;
+    node->has_only_ext_cksums &= !!file->ext_cksum;
 
     /* check whether to send for further hashing, or store in the node */
     if(mode != RM_SHRED_HOLD && RM_SHRED_NEEDS_HASHING(node, cfg)) {
@@ -900,7 +900,7 @@ static void rm_shred_hash_callback(_UNUSED RmHasher *hasher, RmDigest *digest,
     rm_assert_gentle(file->hash_offset <= file->file_size);
 
     if(file->lint_type != RM_LINT_TYPE_READ_ERROR &&
-       shredder->cfg->write_cksum_to_xattr && file->has_ext_cksum == false) {
+       shredder->cfg->write_cksum_to_xattr && file->ext_cksum == NULL) {
         /* remember that checksum */
         rm_xattr_write_hash(shredder->cfg, file);
     }
@@ -1013,11 +1013,7 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredTree *tree) {
     rm_mds_device_ref(file->disk, 1);
 
     if(cfg->read_cksum_from_xattr) {
-        char *ext_cksum = rm_xattr_read_hash(shredder->cfg, file);
-        if(ext_cksum != NULL) {
-            file->folder->data = ext_cksum;
-            file->has_ext_cksum = TRUE;
-        }
+        file->ext_cksum = rm_xattr_read_hash(shredder->cfg, file);
     }
 
     rm_shred_node_add_file(&tree->head, file, RM_SHRED_HOLD);

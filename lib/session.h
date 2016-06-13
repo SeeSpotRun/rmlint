@@ -59,7 +59,7 @@ typedef struct RmFileTables {
     GSList *size_groups;
 
     /*array of lists, one for each "other lint" type */
-    GSList *other_lint[RM_LINT_TYPE_OTHER];
+    GSList *other_lint[RM_LINT_TYPE_LAST_OTHER];
 
     /* lock for access to *list during traversal */
     GMutex lock;

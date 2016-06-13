@@ -366,3 +366,21 @@ gint rm_file_cmp_pathdouble(const RmFile *a, const RmFile *b) {
      */
     return SIGN_DIFF(rm_file_parent_inode(a), rm_file_parent_inode(b));
 }
+
+RmDirInfo *rm_dir_info_new(RmTraversalType traversal) {
+    RmDirInfo *self = g_slice_new0(RmDirInfo);
+    self->hidden = TRUE;
+    self->via_symlink = TRUE;
+    self->traversal = traversal;
+    return self;
+}
+
+void rm_dir_info_free(RmDirInfo *dirinfo) {
+    if(dirinfo == NULL) {
+        return;
+    }
+    if(dirinfo->dupe_IDs) {
+        g_hash_table_unref(dirinfo->dupe_IDs);
+    }
+    g_slice_free(RmDirInfo, dirinfo);
+}

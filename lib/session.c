@@ -474,7 +474,8 @@ int rm_session_run(RmSession *session) {
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PRE_SHUTDOWN);
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_SUMMARY);
 
-    if(session->counters->shred_bytes_remaining != 0) {
+    if(session->counters->shred_bytes_remaining != 0 &&
+       (cfg->find_duplicates || cfg->merge_directories)) {
         rm_log_error_line(
             "BUG: Number of remaining bytes is %lu"
             " (not 0). Please report this.",
@@ -482,7 +483,8 @@ int rm_session_run(RmSession *session) {
         exit_state = EXIT_FAILURE;
     }
 
-    if(session->counters->shred_files_remaining != 0) {
+    if(session->counters->shred_files_remaining != 0 &&
+       (cfg->find_duplicates || cfg->merge_directories)) {
         rm_log_error_line(
             "BUG: Number of remaining files is %lu"
             " (not 0). Please report this.",

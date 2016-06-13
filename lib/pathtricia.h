@@ -114,7 +114,7 @@ char *rm_trie_build_path_unlocked(RmNode *node, char *buf, size_t buf_len);
 
 /**
  * rm_trie_size:
- * Return the size of the trie.
+ * Return the number of nodes in the trie.
  */
 size_t rm_trie_size(RmTrie *self);
 

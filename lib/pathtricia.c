@@ -46,6 +46,7 @@ static RmNode *rm_node_new(RmTrie *trie, const char *elem) {
          */
         self->basename = g_string_chunk_insert(trie->chunks, elem);
     }
+    trie->size++;
     return self;
 }
 
@@ -138,7 +139,6 @@ RmNode *rm_trie_insert(RmTrie *self, const char *path, void *value) {
     if(curr_node != NULL) {
         curr_node->has_value = true;
         curr_node->data = value;
-        self->size++;
     }
 
     g_mutex_unlock(&self->lock);

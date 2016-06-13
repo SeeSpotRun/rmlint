@@ -273,7 +273,7 @@ static void rm_session_merge_pipe(GSList *files, RmSession *session) {
         for(GSList *iter = files; iter; iter = iter->next) {
             RmFile *file = iter->data;
             /* treemerge frees its own RM_LINT_TYPE_DUPE_DIR_CANDIDATE 'files' */
-            if (file->lint_type != RM_LINT_TYPE_DUPE_DIR_CANDIDATE) {
+            if(file->lint_type != RM_LINT_TYPE_DUPE_DIR_CANDIDATE) {
                 rm_file_destroy(file);
             }
         }

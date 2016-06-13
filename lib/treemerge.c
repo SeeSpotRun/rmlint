@@ -713,7 +713,7 @@ static int rm_tm_cmp_directory_groups(GQueue *a, GQueue *b) {
 }
 
 static int rm_tm_free_hidden(RmFile *file, _UNUSED gpointer user_data) {
-    if (file->is_hidden) {
+    if(file->is_hidden) {
         rm_file_destroy(file);
         return TRUE;
     }

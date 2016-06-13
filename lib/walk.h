@@ -33,6 +33,12 @@
  * @file walk.h
  * @brief multi-threaded walk of passed path(s) using md-scheduler
  * to improve speed.
+ * TODO:
+ * [ ] testing
+ * [ ] maybe make RmWalkSession more opaque
+ * [ ] option to run without pathtricia trie
+ * [ ] option to run without MDS
+ * [ ] ignore_root_links option
  **/
 
 /**
@@ -111,12 +117,30 @@ typedef struct RmWalkFile {
     gboolean via_symlink : 1;
 } RmWalkFile;
 
+/**
+ * @brief allocate a new walk session
+ * @param mds an existing multi-disk scheduler
+ * @param result_pipe for sending results
+ * @param trie pathtricia tree; a node is inserted for each dir
+ * @param mounts mount table
+ */
 RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe, RmTrie *trie,
                                    RmMountTable *mounts);
 
+/**
+ * @brief run and free the RmWalkSession
+ * @param paths string vector of absolute paths
+ * @param session the RmWalkSession
+ * @param threads_per_hdd number of threads per rotational disk
+ * @param threads_per_ssd number of threads per non-rotational disk
+ * @param sort_interval re-sort the mds job queues after this many dirs
+ */
 void rm_walk_paths(char **paths, RmWalkSession *walker, gint threads_per_hdd,
                    gint threads_per_ssd, gint sort_interval);
 
+/**
+ * @brief free an RmWalkFile
+ */
 void rm_walk_file_free(RmWalkFile *file);
 
 #endif /* end of include guard */

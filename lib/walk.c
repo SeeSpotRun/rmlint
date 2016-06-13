@@ -27,20 +27,30 @@
 #include <glib.h>
 #include <string.h>
 
-/**
- * upwardly-linked tree of breadcrumb trails for cyclic dir detection.
- */
-
 #define ISDOT(a) (a[0] == '.' && (a[1] == 0 || (a[1] == '.' && a[2] == 0)))
 #define ISHIDDEN(a) (a[0] == '.')
 
+//////////////////////
+//    Structs       //
+//////////////////////
+
+/**
+ * @brief RmWalkCrumb is a backwards-linked breadcrumb trail of inodes;
+ * it is used for cyclic dir detection;
+ * @note linkage is many-to-one so dynamic freeing is difficult;
+ * instead we keep a GAsyncQueue of allocated crumbs for freeing
+ * at the end of the session;
+ */
 typedef struct RmWalkCrumb {
     struct RmWalkCrumb *parent; /* many-to-one link to parent crumb */
     ino_t inode;
     dev_t dev;
 } RmWalkCrumb;
 
-/* job for directory traverser threadpool */
+/**
+ * RmWalkDir is a struct for passing jobs to the directory
+ * traverser threadpool
+ */
 typedef struct RmWalkDir {
     RmStat *statp; /* stat(2) information about the directory */
     char *path;
@@ -57,37 +67,9 @@ typedef struct RmWalkDir {
     RmWalkCrumb *crumbs; /* cycle checker */
 } RmWalkDir;
 
-static void rm_walk_send(RmWalkSession *walker, char *path, char *bname,
-                         RmNode *parent_node, RmStat **sp, bool is_hidden,
-                         bool is_symlink, bool via_symlink, guint index, RmWalkType type,
-                         gint16 depth) {
-    RmWalkFile *file = g_slice_new(RmWalkFile);
-    file->path = g_strdup(path);
-    file->bname = g_strdup(bname);
-    file->type = type;
-    file->dir_node = parent_node;
-    file->is_hidden = is_hidden;
-    file->via_symlink = via_symlink;
-    file->is_symlink = is_symlink;
-    file->index = index;
-    file->depth = depth;
-    file->err = errno;
-    errno = 0;
-
-    /* steal the stat struct */
-    file->statp = *sp;
-    *sp = NULL;
-
-    rm_util_thread_pool_push(walker->result_pipe, file);
-}
-
-/**
- * @brief check breadcrumb trail to see if same dir already in trail
- */
-static bool rm_walk_is_cycle(dev_t dev, ino_t inode, RmWalkCrumb *crumbs) {
-    return !!crumbs && ((dev == crumbs->dev && inode == crumbs->inode) ||
-                        rm_walk_is_cycle(dev, inode, crumbs->parent));
-}
+//////////////////////
+//    RmWalkCrumb   //
+//////////////////////
 
 /**
  * @brief create new breadcrumb entry linked to parent crumb
@@ -111,6 +93,23 @@ static void rm_walk_crumb_free(RmWalkCrumb *crumb) {
     g_slice_free(RmWalkCrumb, crumb);
 }
 
+/**
+ * @brief check breadcrumb trail to see if same dir already in trail
+ */
+static bool rm_walk_is_cycle(dev_t dev, ino_t inode, RmWalkCrumb *crumbs) {
+    return !!crumbs && ((dev == crumbs->dev && inode == crumbs->inode) ||
+                        rm_walk_is_cycle(dev, inode, crumbs->parent));
+}
+
+//////////////////////
+//    RmWalkDir     //
+//////////////////////
+
+/**
+ * create an RmWalkDir struct for a dir and send it to the md-scheduler;
+ * is freed by the threadpool worker rm_walk_dir();
+ * steals the RmStat struct pointed to by **sp;
+ */
 static void rm_walk_schedule_dir(char *path, char *bname, RmStat **sp, guint index,
                                  gint depth, gboolean is_hidden, gboolean via_symlink,
                                  RmWalkDir *parent_dir, RmWalkSession *walker) {
@@ -159,7 +158,7 @@ static void rm_walk_schedule_dir(char *path, char *bname, RmStat **sp, guint ind
 }
 
 /**
- * frees the structs allocated by rm_walk_schedule_dir()
+ * free the structs allocated by rm_walk_schedule_dir()
  */
 static void rm_walk_dir_free(RmWalkDir *dir) {
     g_free(dir->path);
@@ -170,13 +169,53 @@ static void rm_walk_dir_free(RmWalkDir *dir) {
     g_slice_free(RmWalkDir, dir);
 }
 
-/* Macro for rm_traverse_directory() for easy file adding */
-#define SEND_FILE(test, type)                                                         \
-    if((test)) {                                                                      \
-        rm_walk_send(walker, path, bname, parent_node, &statp, is_hidden, is_symlink, \
-                     via_symlink, index, (type), depth);                              \
+//////////////////////
+//    RmWalkFile    //
+//////////////////////
+
+/**
+ * create an RmWalkFile and send it to result_pipe;
+ * steals the RmStat struct pointed to by **sp;
+ * the result_pipe worker should free it via rm_walk_file_free()
+ */
+static void rm_walk_file_send(RmWalkSession *walker, char *path, char *bname,
+                              RmNode *parent_node, RmStat **sp, bool is_hidden,
+                              bool is_symlink, bool via_symlink, guint index,
+                              RmWalkType type, gint16 depth) {
+    RmWalkFile *file = g_slice_new(RmWalkFile);
+    file->path = g_strdup(path);
+    file->bname = g_strdup(bname);
+    file->type = type;
+    file->dir_node = parent_node;
+    file->is_hidden = is_hidden;
+    file->via_symlink = via_symlink;
+    file->is_symlink = is_symlink;
+    file->index = index;
+    file->depth = depth;
+    file->err = errno;
+    errno = 0;
+
+    /* steal the stat struct */
+    file->statp = *sp;
+    *sp = NULL;
+
+    rm_util_thread_pool_push(walker->result_pipe, file);
+}
+
+/* Macro for rm_walk_path() for convenience;
+ * calls rm_walk_file_send() if test evaluates to TRUE
+ */
+#define SEND_FILE(test, type)                                                  \
+    if((test)) {                                                               \
+        rm_walk_file_send(walker, path, bname, parent_node, &statp, is_hidden, \
+                          is_symlink, via_symlink, index, (type), depth);      \
     }
 
+/**
+ * process a path and categorise it;
+ * maybe send it to result_pipe;
+ * if it's a dir then maybe schedule traversal of the dir;
+ */
 void rm_walk_path(RmWalkSession *walker, char *path, char *bname, guint index,
                   guint16 depth, bool is_hidden, bool via_symlink,
                   RmWalkDir *parent_dir) {
@@ -241,7 +280,6 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, guint index,
     /* handle subdirs */
     if(S_ISDIR(statp->st_mode)) {
         if(is_hidden && !walker->walk_hidden) {
-            /* maybe send a warning that we skipped the dir */
             SEND_FILE(walker->send_hidden && walker->send_warnings, RM_WALK_HIDDEN_DIR)
         } else if(depth > 0 && g_hash_table_contains(walker->roots, path)) {
             SEND_FILE(walker->send_warnings, RM_WALK_SKIPPED_ROOT)
@@ -296,12 +334,20 @@ done:
 
 #undef SEND_FILE
 
-#define SEND_DIR(test, type)                                                          \
-    if(test) {                                                                        \
-        rm_walk_send(walker, dir->path, NULL, dir->node, &dir->statp, dir->is_hidden, \
-                     FALSE, dir->via_symlink, dir->index, type, dir->depth);          \
+/* Macro for rm_walk_dir() for convenience;
+ * calls rm_walk_file_send() if test evaluates to TRUE
+ */
+#define SEND_DIR(test, type)                                                         \
+    if(test) {                                                                       \
+        rm_walk_file_send(walker, dir->path, NULL, dir->node, &dir->statp,           \
+                          dir->is_hidden, FALSE, dir->via_symlink, dir->index, type, \
+                          dir->depth);                                               \
     }
 
+/**
+ * RmMDS callback to traverse a directory;
+ * calls rm_walk_path() for each valid entry
+ */
 static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
     char *path = g_slice_alloc(PATH_MAX * sizeof(char));
     char *path_ptr = g_stpcpy(path, dir->path);
@@ -348,9 +394,9 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
 #endif
         if(path_ptr + dnamlen + 1 > path + PATH_MAX) {
             if(walker->send_errors) {
-                rm_walk_send(walker, path, de->d_name, dir->node, &dir->statp, is_hidden,
-                             FALSE, dir->via_symlink, dir->index, RM_WALK_PATHMAX,
-                             dir->depth + 1);
+                rm_walk_file_send(walker, path, de->d_name, dir->node, &dir->statp,
+                                  is_hidden, FALSE, dir->via_symlink, dir->index,
+                                  RM_WALK_PATHMAX, dir->depth + 1);
             }
             continue;
         }
@@ -369,6 +415,12 @@ done:
 }
 
 #undef SEND_DIR
+#undef ISDOT
+#undef ISHIDDEN
+
+//////////////////////////////
+//        WALK API          //
+//////////////////////////////
 
 RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe, RmTrie *trie,
                                    RmMountTable *mounts) {

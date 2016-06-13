@@ -84,6 +84,12 @@ RmNode *rm_trie_insert(RmTrie *self, const char *path, void *value);
 RmNode *rm_trie_insert_unlocked(RmTrie *self, const char *path, void *value);
 
 /**
+ * @brief add an entry to node
+ */
+RmNode *rm_node_insert(RmTrie *trie, RmNode *parent, const char *basename);
+RmNode *rm_node_insert_unlocked(RmTrie *trie, RmNode *parent, const char *basename);
+
+/**
  * rm_trie_search_node:
  * Search a node in the trie by path.
  */

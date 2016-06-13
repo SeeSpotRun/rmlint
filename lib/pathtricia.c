@@ -58,20 +58,26 @@ static void rm_node_free(RmNode *node) {
     g_slice_free(RmNode, node);
 }
 
-static RmNode *rm_node_insert(RmTrie *trie, RmNode *parent, const char *elem) {
+RmNode *rm_node_insert_unlocked(RmTrie *trie, RmNode *parent, const char *basename) {
     if(parent->children == NULL) {
         parent->children = g_hash_table_new(g_str_hash, g_str_equal);
     }
 
-    RmNode *exists = g_hash_table_lookup(parent->children, elem);
-    if(exists == NULL) {
-        RmNode *node = rm_node_new(trie, elem);
-        node->parent = parent;
-        g_hash_table_insert(parent->children, node->basename, node);
-        return node;
+    RmNode *result = g_hash_table_lookup(parent->children, basename);
+    if(result == NULL) {
+        result = rm_node_new(trie, basename);
+        result->parent = parent;
+        g_hash_table_insert(parent->children, result->basename, result);
     }
+    return result;
+}
 
-    return exists;
+RmNode *rm_node_insert(RmTrie *trie, RmNode *parent, const char *basename) {
+    RmNode *result;
+    g_mutex_lock(&trie->lock);
+    result = rm_node_insert_unlocked(trie, parent, basename);
+    g_mutex_unlock(&trie->lock);
+    return result;
 }
 
 ///////////////////////////
@@ -132,8 +138,10 @@ RmNode *rm_trie_insert(RmTrie *self, const char *path, void *value) {
     char *path_elem = NULL;
     RmNode *curr_node = self->root;
 
+    /* iterate from beginning of path, finding or adding node for
+     * each path element */
     while((path_elem = rm_path_iter_next(&iter))) {
-        curr_node = rm_node_insert(self, curr_node, path_elem);
+        curr_node = rm_node_insert_unlocked(self, curr_node, path_elem);
     }
 
     if(curr_node != NULL) {
@@ -209,6 +217,7 @@ char *rm_trie_build_path_unlocked(RmNode *node, char *buf, size_t buf_len) {
     while(n_elements && (size_t)(buf_ptr - buf) < buf_len) {
         *buf_ptr = '/';
         buf_ptr = g_stpcpy(buf_ptr + 1, (char *)elements[--n_elements]);
+        /* TODO: error handling for buffer overflow */
     }
 
     return buf;

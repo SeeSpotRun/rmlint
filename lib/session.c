@@ -265,7 +265,8 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
             rm_file_destroy(file);
         }
     } else if(file->lint_type >= RM_LINT_TYPE_LAST_OTHER) {
-        rm_assert_gentle(file->lint_type <= RM_LINT_TYPE_DUPE_CANDIDATE);
+        rm_assert_gentle(!RM_IS_REPORTING_TYPE(file->lint_type));
+
         /* filtered reject based on mtime, --keep, etc */
         rm_file_destroy(file);
     } else {

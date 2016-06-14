@@ -176,7 +176,7 @@ static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
     }
 
     /* add file towards parent dir's file count */
-    RmNode *parent = file->folder;
+    RmNode *parent = file->folder->parent;
     rm_assert_gentle(parent);
     RmDirInfo *parent_info = parent->data;
     if(parent_info) {

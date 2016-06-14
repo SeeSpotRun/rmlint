@@ -63,7 +63,7 @@ RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev,
 
     self->folder = node;
     self->depth = depth;
-    while ((node = node->parent)) {
+    while (node && (node = node->parent)) {
         self->path_depth ++;
     }
 

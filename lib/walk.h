@@ -57,8 +57,8 @@ typedef struct RmWalkSession {
                      // note: root symlinks will be processed regardless
     bool see_links;  // if true, walk returns symlinks as symlinks (else as their targets)
     bool see_dot;    // if true, returns "." and ".." entries // TODO:
-    bool send_hidden;    // if true, will send files starting with '.'
-    bool walk_hidden;    // if true, will traverse dirs starting with '.'
+    bool send_hidden;    // if true, will send files starting with '.', else may send warning
+    bool walk_hidden;    // if true, will traverse dirs starting with '.', else may send warning
                          // (note: hidden root paths are always processed)
     bool send_dirs;      // if true, sends dir paths
     bool ignore_files;   // if true, doesn't return files

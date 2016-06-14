@@ -280,7 +280,7 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, guint index,
     /* handle subdirs */
     if(S_ISDIR(statp->st_mode)) {
         if(is_hidden && !walker->walk_hidden) {
-            SEND_FILE(walker->send_hidden && walker->send_warnings, RM_WALK_HIDDEN_DIR)
+            SEND_FILE(walker->send_warnings, RM_WALK_HIDDEN_DIR)
         } else if(depth > 0 && g_hash_table_contains(walker->roots, path)) {
             SEND_FILE(walker->send_warnings, RM_WALK_SKIPPED_ROOT)
         } else if(walker->one_device && parent_dir &&
@@ -382,7 +382,8 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
         }
 
         gboolean is_hidden = dir->is_hidden || (dir->depth > 0 && ISHIDDEN(de->d_name));
-        if(is_hidden && !walker->walk_hidden && !walker->send_hidden) {
+        if(is_hidden && !walker->walk_hidden && !walker->send_hidden && !walker->send_warnings) {
+            /* can totally ignore hidden file/folder */
             continue;
         }
 

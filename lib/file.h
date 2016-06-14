@@ -359,7 +359,7 @@ void rm_dir_info_free(RmDirInfo *info);
 /**
  * @brief Create a new RmFile handle.
  */
-RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
+RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev,
                     ino_t inode, time_t mtime, RmLintType type, bool is_ppath,
                     unsigned path_index, short depth);
 
@@ -368,12 +368,6 @@ RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
  * @note does not deallocate file->digest since this is handled by shredder.c
  */
 void rm_file_destroy(RmFile *file);
-
-/**
- * @brief Set a path to the file. Normally, you should never do this since the
- * path is immutable.
- */
-void rm_file_set_path(RmFile *file, char *path);
 
 /**
  * @brief Convert RmLintType to a human readable short string.

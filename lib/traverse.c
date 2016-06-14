@@ -83,7 +83,12 @@ static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
         }
     }
 
-    RmFile *file = rm_file_new(traverser->cfg, walkfile->path, walkfile->statp->st_size,
+    RmNode *node = walkfile->dir_node;
+    if (walkfile->bname) {
+        /* it's a file so not in the trie yet */
+        node = rm_node_insert(&traverser->cfg->file_trie, node, walkfile->bname);
+    }
+    RmFile *file = rm_file_new(traverser->cfg, node, walkfile->statp->st_size,
                            walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
                            lint_type, is_prefd, walkfile->index, walkfile->depth);
     rm_assert_gentle(file);

@@ -330,7 +330,7 @@ static void rm_directory_to_file(RmTreeMerger *merger, const RmDirectory *self,
 
     /* Need to set cfg first, since set_path expects that */
     file->cfg = merger->cfg;
-    rm_file_set_path(file, self->dirname);
+    file->folder = rm_trie_insert(&merger->cfg->file_trie, self->dirname, NULL);
 
     file->lint_type = RM_LINT_TYPE_DUPE_DIR_CANDIDATE;
 

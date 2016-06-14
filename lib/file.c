@@ -33,7 +33,7 @@
 #include <sys/file.h>
 #include <unistd.h>
 
-RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
+RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev,
                     ino_t inode, time_t mtime, RmLintType type, bool is_ppath,
                     unsigned path_index, short depth) {
     RmOff actual_file_size = size;
@@ -61,10 +61,11 @@ RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
     RmFile *self = g_slice_new0(RmFile);
     self->cfg = cfg;
 
-    rm_file_set_path(self, (char *)path);
-
+    self->folder = node;
     self->depth = depth;
-    self->path_depth = rm_util_path_depth(path);
+    while ((node = node->parent)) {
+        self->path_depth ++;
+    }
 
     self->inode = inode;
     self->dev = dev;
@@ -88,10 +89,6 @@ RmFile *rm_file_new(const RmCfg *cfg, const char *path, size_t size, dev_t dev,
     self->path_index = path_index;
 
     return self;
-}
-
-void rm_file_set_path(RmFile *file, char *path) {
-    file->folder = rm_trie_insert((RmTrie *)&file->cfg->file_trie, path, NULL);
 }
 
 void rm_file_build_path(const RmFile *file, char *buf) {

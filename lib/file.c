@@ -102,10 +102,8 @@ void rm_file_destroy(RmFile *file) {
         g_queue_free_full(file->hardlinks.files, (GDestroyNotify)rm_file_destroy);
     }
 
-    // TODO: Make this more generic.
-    /* --xattr-read can write cksums in here */
-    if(file->folder && file->folder->data) {
-        g_free(file->folder->data);
+    if(file->ext_cksum) {
+        g_free(file->ext_cksum);
     }
 
     if(file->digest && !file->hardlinks.hardlink_head) {

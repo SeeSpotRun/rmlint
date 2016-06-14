@@ -36,27 +36,6 @@
 RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev,
                     ino_t inode, time_t mtime, RmLintType type, bool is_ppath,
                     unsigned path_index, short depth) {
-    RmOff actual_file_size = size;
-    RmOff start_seek = 0;
-
-    /* Allow an actual file size of 0 for empty files */
-    if(actual_file_size != 0) {
-        if(cfg->use_absolute_start_offset) {
-            start_seek = cfg->skip_start_offset;
-            if(cfg->skip_start_offset >= actual_file_size) {
-                return NULL;
-            }
-        } else {
-            start_seek = cfg->skip_start_factor * actual_file_size;
-            if((int)(actual_file_size * cfg->skip_end_factor) == 0) {
-                return NULL;
-            }
-
-            if(start_seek >= actual_file_size) {
-                return NULL;
-            }
-        }
-    }
 
     RmFile *self = g_slice_new0(RmFile);
     self->cfg = cfg;
@@ -71,15 +50,6 @@ RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev,
     self->dev = dev;
     self->mtime = mtime;
 
-    if(type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-        if(cfg->use_absolute_end_offset) {
-            self->file_size = CLAMP(actual_file_size, 1, cfg->skip_end_offset);
-        } else {
-            self->file_size = actual_file_size * cfg->skip_end_factor;
-        }
-    }
-
-    self->hash_offset = start_seek;
     self->disk_offset = (RmOff)-1;
 
     self->lint_type = type;
@@ -87,7 +57,24 @@ RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev,
     self->is_original = false;
     self->is_symlink = false;
     self->path_index = path_index;
-
+    self->file_size = size;
+    if(type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+        if(cfg->use_absolute_end_offset) {
+            self->file_size = CLAMP(size, 1, cfg->skip_end_offset);
+        } else {
+            self->file_size = size * cfg->skip_end_factor;
+        }
+        if(cfg->use_absolute_start_offset) {
+            self->hash_offset = cfg->skip_start_offset;
+        } else {
+            self->hash_offset = cfg->skip_start_factor * size;
+        }
+        if(self->hash_offset >= self->file_size) {
+            /* oops tightened the clamp too much! */
+            self->lint_type = RM_LINT_TYPE_OVERCLAMPED;
+            self->hash_offset = self->file_size;
+        }
+    }
     return self;
 }
 

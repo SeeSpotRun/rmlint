@@ -105,8 +105,6 @@ typedef struct _RmMDSDevice {
      *  self->ref_count
      */
     GMutex lock;
-    GCond cond;
-    gint waiting;
 
     /* Reference count for self */
     gint ref_count;
@@ -147,7 +145,6 @@ static RmMDSDevice *rm_mds_device_new(RmMDS *mds, const dev_t disk) {
     RmMDSDevice *self = g_slice_new0(RmMDSDevice);
 
     g_mutex_init(&self->lock);
-    g_cond_init(&self->cond);
 
     self->mds = mds;
     self->ref_count = 0;
@@ -172,7 +169,6 @@ static RmMDSDevice *rm_mds_device_new(RmMDS *mds, const dev_t disk) {
  **/
 static void rm_mds_device_free(RmMDSDevice *self) {
     g_mutex_clear(&self->lock);
-    g_cond_clear(&self->cond);
     g_slice_free(RmMDSDevice, self);
 }
 
@@ -405,9 +401,6 @@ void rm_mds_push_task(RmMDSDevice *device, dev_t dev, gint64 offset, const char 
             device->unsorted_tasks = g_slist_prepend(device->unsorted_tasks, task);
         } else {
             device->sorted_tasks = g_slist_prepend(device->sorted_tasks, task);
-        }
-        if(device->waiting) {
-            g_cond_signal(&device->cond);
         }
     }
     g_mutex_unlock(&device->lock);

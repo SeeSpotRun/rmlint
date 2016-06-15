@@ -264,16 +264,17 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
         if(!session->cfg->cache_file_structs) {
             rm_file_destroy(file);
         }
-    } else if(file->lint_type >= RM_LINT_TYPE_LAST_OTHER) {
-        rm_assert_gentle(!RM_IS_REPORTING_TYPE(file->lint_type));
-
-        /* filtered reject based on mtime, --keep, etc */
-        rm_file_destroy(file);
-    } else {
+    } else if RM_IS_OTHER_LINT_TYPE(file->lint_type) {
         /* collect "other lint" for later processing */
         session->tables->other_lint[file->lint_type] =
             g_slist_prepend(session->tables->other_lint[file->lint_type], file);
         session->counters->other_lint_cnt++;
+    } else if(RM_IS_REPORTING_TYPE(file->lint_type)) {
+        /* filtered reject based on mtime, --keep, etc */
+        rm_file_destroy(file);
+    } else {
+        rm_log_error_line("Unexpected lint type: %d", file->lint_type);
+        rm_assert_gentle_not_reached()
     }
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_PREPROCESS);
 }

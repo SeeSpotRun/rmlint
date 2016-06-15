@@ -269,7 +269,7 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
         session->tables->other_lint[file->lint_type] =
             g_slist_prepend(session->tables->other_lint[file->lint_type], file);
         session->counters->other_lint_cnt++;
-    } else if(RM_IS_REPORTING_TYPE(file->lint_type)) {
+    } else if(!RM_IS_REPORTING_TYPE(file->lint_type)) {
         /* filtered reject based on mtime, --keep, etc */
         rm_file_destroy(file);
     } else {

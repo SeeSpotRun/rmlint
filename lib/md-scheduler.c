@@ -96,6 +96,9 @@ typedef struct _RmMDSDevice {
     /* Stack for tasks that will be sorted and carried out next pass */
     GSList *unsorted_tasks;
 
+    /* number of items in sorted_tasks + unsorted_tasks */
+    guint pending;
+
     /* Sorting function for device task queue */
     RmMDSSortFunc prioritiser;
 
@@ -176,14 +179,19 @@ static void rm_mds_device_free(RmMDSDevice *self) {
 //    RmMDSDevice Implementation   //
 ///////////////////////////////////////
 
-/** @brief GCompareDataFunc wrapper for mds->prioritiser
- **/
+/**
+ * @brief prioritises two tasks associated with a device.
+ * @note GCompareDataFunc wrapper for mds->prioritiser
+ */
 static gint rm_mds_compare(const RmMDSTask *a, const RmMDSTask *b,
                            RmMDSSortFunc prioritiser) {
     gint result = prioritiser(a, b);
     return result;
 }
 
+/**
+ * @brief sorts a devices task lists into order of priority
+ */
 static gboolean rm_mds_device_sort(RmMDSDevice *device) {
     /* sort and merge task lists */
     gboolean result = FALSE;
@@ -206,6 +214,33 @@ static gboolean rm_mds_device_sort(RmMDSDevice *device) {
     return result;
 }
 
+/**
+ * @brief sorts devices into order of number of active threads divided
+ * by number of pending tasks
+ */
+static gint rm_mds_device_prioritise(RmMDSDevice *a, RmMDSDevice *b, _UNUSED gpointer user_data) {
+    if (a==b) {
+        return 0;
+    }
+    /* do an un-threadsafe comparison; the occasional incorrect result
+     * will not do any real harm */
+    return b->pending * a->threads - a->pending * b->threads;
+}
+
+static gpointer rm_device_pop_task(RmMDSDevice *device) {
+    gpointer *task = NULL;
+    g_mutex_lock(&device->lock);
+    {
+        if (device->sorted_tasks) {
+            task = device->sorted_tasks->data;
+            device->sorted_tasks = g_slist_delete_link(device->sorted_tasks, device->sorted_tasks);
+            device->pending--;
+        }
+    }
+    g_mutex_unlock(&device->lock);
+    return task;
+}
+
 /** @brief RmMDSDevice worker thread
  **/
 static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
@@ -217,7 +252,7 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
     /* process tasks from device->sorted_tasks */
     RmMDSTask *task = NULL;
     while(processed < mds->pass_quota &&
-          (task = rm_util_slist_pop(&device->sorted_tasks, &device->lock))) {
+          (task = rm_device_pop_task(device))) {
         mds->func(task->task_data, mds->user_data);
         ++processed;
         rm_mds_task_free(task);
@@ -228,8 +263,12 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
             /* queue is empty; wait a moment */
             g_usleep(1000);
         }
-        /* return self to pool for further processing */
+        /* do a once-off sort and return self to pool for further processing */
+        g_thread_pool_set_sort_function (mds->pool,
+                         (GCompareDataFunc)rm_mds_device_prioritise,
+                         NULL);
         rm_util_thread_pool_push(mds->pool, device);
+        g_thread_pool_set_sort_function (mds->pool, NULL, NULL);
     } else if(g_atomic_int_dec_and_test(&device->threads)) {
         /* free self and signal to rm_mds_free() */
         g_mutex_lock(&mds->lock);
@@ -402,6 +441,7 @@ void rm_mds_push_task(RmMDSDevice *device, dev_t dev, gint64 offset, const char 
         } else {
             device->sorted_tasks = g_slist_prepend(device->sorted_tasks, task);
         }
+        device->pending++;
     }
     g_mutex_unlock(&device->lock);
 }

@@ -33,17 +33,16 @@
 #include <sys/file.h>
 #include <unistd.h>
 
-RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev,
-                    ino_t inode, time_t mtime, RmLintType type, bool is_ppath,
-                    unsigned path_index, short depth) {
-
+RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev, ino_t inode,
+                    time_t mtime, RmLintType type, bool is_ppath, unsigned path_index,
+                    short depth) {
     RmFile *self = g_slice_new0(RmFile);
     self->cfg = cfg;
 
     self->folder = node;
     self->depth = depth;
-    while (node && (node = node->parent)) {
-        self->path_depth ++;
+    while(node && (node = node->parent)) {
+        self->path_depth++;
     }
 
     self->inode = inode;
@@ -89,10 +88,10 @@ void rm_file_destroy(RmFile *file) {
         g_queue_free_full(file->hardlinks.files, (GDestroyNotify)rm_file_destroy);
     }
 
-    if(file->ext_cksum) {
-        g_free(file->ext_cksum);
     }
 
+    if(file->ext_cksum) {
+        g_free(file->ext_cksum);
     if(file->digest && !file->hardlinks.hardlink_head) {
         rm_digest_free(file->digest);
     }

@@ -66,10 +66,10 @@ typedef enum RmLintType {
      * empty dirs freed by formats.c;
      * the rest freed by treemerge.c */
     RM_LINT_GROUP_DUPE_DIRS = 0x20,
-    RM_LINT_TYPE_DIR,         /* dir encountered during traverse */
-    RM_LINT_TYPE_DUPE_DIR_CANDIDATE,    /* duplicate dir */
-    RM_LINT_TYPE_UNIQUE_DIR,  /* unmatched dir */
-    RM_LINT_TYPE_DUPE_SUBDIR, /* subdir of dupe dir */
+    RM_LINT_TYPE_DIR,                /* dir encountered during traverse */
+    RM_LINT_TYPE_DUPE_DIR_CANDIDATE, /* duplicate dir */
+    RM_LINT_TYPE_UNIQUE_DIR,         /* unmatched dir */
+    RM_LINT_TYPE_DUPE_SUBDIR,        /* subdir of dupe dir */
 
     /* Files skipped during traversal; these count +1 towards
      * parent dir file count (for emptydir and dupe dir detection).
@@ -359,9 +359,9 @@ void rm_dir_info_free(RmDirInfo *info);
 /**
  * @brief Create a new RmFile handle.
  */
-RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev,
-                    ino_t inode, time_t mtime, RmLintType type, bool is_ppath,
-                    unsigned path_index, short depth);
+RmFile *rm_file_new(const RmCfg *cfg, RmNode *node, size_t size, dev_t dev, ino_t inode,
+                    time_t mtime, RmLintType type, bool is_ppath, unsigned path_index,
+                    short depth);
 
 /**
  * @brief Deallocate the memory allocated by rm_file_new.

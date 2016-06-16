@@ -84,16 +84,17 @@ static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
     }
 
     RmNode *node = walkfile->dir_node;
-    if (!node) {
+    if(!node) {
         /* file passed directly, not traversed */
         node = rm_trie_insert(&traverser->cfg->file_trie, walkfile->path, NULL);
-    } else if (walkfile->bname) {
+    } else if(walkfile->bname) {
         /* it's a file so not in the trie yet; node is the parent folder */
-        node = rm_node_insert(&traverser->cfg->file_trie, walkfile->dir_node, walkfile->bname);
+        node = rm_node_insert(&traverser->cfg->file_trie, walkfile->dir_node,
+                              walkfile->bname);
     }
     RmFile *file = rm_file_new(traverser->cfg, node, walkfile->statp->st_size,
-                           walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
-                           lint_type, is_prefd, walkfile->index, walkfile->depth);
+                               walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
+                               lint_type, is_prefd, walkfile->index, walkfile->depth);
     rm_assert_gentle(file);
     file->is_hidden = walkfile->is_hidden;
     file->via_symlink = walkfile->via_symlink;

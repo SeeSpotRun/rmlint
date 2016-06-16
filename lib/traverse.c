@@ -237,7 +237,7 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *result_pipe, RmMDS *mds,
     walker->max_depth = cfg->depth;
 
     rm_walk_paths(cfg->paths, walker, cfg->threads_per_hdd, cfg->threads_per_ssd,
-                  cfg->sweep_count);
+                  2);
     g_thread_pool_free(walk_pipe, FALSE, TRUE);
 
     rm_userlist_destroy(traverser.userlist);

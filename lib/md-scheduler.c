@@ -218,8 +218,9 @@ static gboolean rm_mds_device_sort(RmMDSDevice *device) {
  * @brief sorts devices into order of number of active threads divided
  * by number of pending tasks
  */
-static gint rm_mds_device_prioritise(RmMDSDevice *a, RmMDSDevice *b, _UNUSED gpointer user_data) {
-    if (a==b) {
+static gint rm_mds_device_prioritise(RmMDSDevice *a, RmMDSDevice *b,
+                                     _UNUSED gpointer user_data) {
+    if(a == b) {
         return 0;
     }
     /* do an un-threadsafe comparison; the occasional incorrect result
@@ -231,9 +232,10 @@ static gpointer rm_device_pop_task(RmMDSDevice *device) {
     gpointer *task = NULL;
     g_mutex_lock(&device->lock);
     {
-        if (device->sorted_tasks) {
+        if(device->sorted_tasks) {
             task = device->sorted_tasks->data;
-            device->sorted_tasks = g_slist_delete_link(device->sorted_tasks, device->sorted_tasks);
+            device->sorted_tasks =
+                g_slist_delete_link(device->sorted_tasks, device->sorted_tasks);
             device->pending--;
         }
     }
@@ -251,8 +253,7 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
 
     /* process tasks from device->sorted_tasks */
     RmMDSTask *task = NULL;
-    while(processed < mds->pass_quota &&
-          (task = rm_device_pop_task(device))) {
+    while(processed < mds->pass_quota && (task = rm_device_pop_task(device))) {
         mds->func(task->task_data, mds->user_data);
         ++processed;
         rm_mds_task_free(task);
@@ -264,11 +265,10 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
             g_usleep(1000);
         }
         /* do a once-off sort and return self to pool for further processing */
-        g_thread_pool_set_sort_function (mds->pool,
-                         (GCompareDataFunc)rm_mds_device_prioritise,
-                         NULL);
+        g_thread_pool_set_sort_function(mds->pool,
+                                        (GCompareDataFunc)rm_mds_device_prioritise, NULL);
         rm_util_thread_pool_push(mds->pool, device);
-        g_thread_pool_set_sort_function (mds->pool, NULL, NULL);
+        g_thread_pool_set_sort_function(mds->pool, NULL, NULL);
     } else if(g_atomic_int_dec_and_test(&device->threads)) {
         /* free self and signal to rm_mds_free() */
         g_mutex_lock(&mds->lock);

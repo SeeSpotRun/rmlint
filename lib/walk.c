@@ -283,8 +283,9 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, guint index,
             SEND_FILE(walker->send_warnings, RM_WALK_HIDDEN_DIR)
         } else if(depth > 0 && g_hash_table_contains(walker->roots, path)) {
             SEND_FILE(walker->send_warnings, RM_WALK_SKIPPED_ROOT)
-        } else if(walker->one_device && parent_dir &&
+        } else if(walker->one_device && parent_dir && parent_dir->statp &&
                   statp->st_dev != parent_dir->statp->st_dev) {
+            rm_log_info_line("rm_walk_path: RM_WALK_XDEV");
             SEND_FILE(walker->send_warnings, RM_WALK_XDEV);
         } else if(rm_mounts_is_evil(walker->mounts, statp->st_dev)) {
             SEND_FILE(walker->send_warnings, RM_WALK_EVILFS);

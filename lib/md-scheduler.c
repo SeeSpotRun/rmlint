@@ -214,20 +214,6 @@ static gboolean rm_mds_device_sort(RmMDSDevice *device) {
     return result;
 }
 
-/**
- * @brief sorts devices into order of number of active threads divided
- * by number of pending tasks
- */
-static gint rm_mds_device_prioritise(RmMDSDevice *a, RmMDSDevice *b,
-                                     _UNUSED gpointer user_data) {
-    if(a == b) {
-        return 0;
-    }
-    /* do an un-threadsafe comparison; the occasional incorrect result
-     * will not do any real harm */
-    return b->pending * a->threads - a->pending * b->threads;
-}
-
 static gpointer rm_device_pop_task(RmMDSDevice *device) {
     gpointer *task = NULL;
     g_mutex_lock(&device->lock);
@@ -264,11 +250,7 @@ static void rm_mds_factory(RmMDSDevice *device, RmMDS *mds) {
             /* queue is empty; wait a moment */
             g_usleep(1000);
         }
-        /* do a once-off sort and return self to pool for further processing */
-        g_thread_pool_set_sort_function(mds->pool,
-                                        (GCompareDataFunc)rm_mds_device_prioritise, NULL);
         rm_util_thread_pool_push(mds->pool, device);
-        g_thread_pool_set_sort_function(mds->pool, NULL, NULL);
     } else if(g_atomic_int_dec_and_test(&device->threads)) {
         /* free self and signal to rm_mds_free() */
         g_mutex_lock(&mds->lock);

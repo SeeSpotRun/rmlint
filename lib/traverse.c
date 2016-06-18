@@ -46,7 +46,6 @@ typedef struct RmTravSession {
 // ACTUAL WORK HERE //
 //////////////////////
 
-
 static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
                              RmLintType lint_type, gboolean check_output,
                              gboolean check_perms) {
@@ -237,7 +236,8 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *result_pipe, RmMDS *mds,
 
     walker->max_depth = cfg->depth;
 
-    rm_walk_paths(cfg->paths, walker, cfg->threads_per_hdd, cfg->threads_per_ssd, 10);
+    rm_walk_paths(cfg->paths, walker, cfg->threads_per_hdd, cfg->threads_per_ssd,
+                  cfg->sweep_count);
     g_thread_pool_free(walk_pipe, FALSE, TRUE);
 
     rm_userlist_destroy(traverser.userlist);

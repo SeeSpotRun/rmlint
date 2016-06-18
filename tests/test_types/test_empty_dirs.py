@@ -9,13 +9,14 @@ def test_simple():
     create_file('xxx', 'not_empty/a')
     create_file('', 'empty_but_with_file/a')
     create_dirs('really_empty')
-    head, *data, footer = run_rmlint('-T "none +ed"')
+    head, *data, footer = run_rmlint('-T "ed"')
 
     assert footer['total_files'] == 2
     assert footer['duplicates'] == 0
     assert footer['total_lint_size'] == 0
     assert len(data) == 1
-    assert data[0]['size'] == 0
+    # depends how we define folder size:
+    # assert data[0]['size'] == 0
 
 
 @with_setup(usual_setup_func, usual_teardown_func)
@@ -39,11 +40,11 @@ def test_deep():
 @with_setup(usual_setup_func, usual_teardown_func)
 def test_hidden():
     create_file('xxx', 'not_empty/.hidden')
-    head, *data, footer = run_rmlint('-T "none +ed"')
+    head, *data, footer = run_rmlint('-T "ed"')
 
     assert footer['total_files'] == 0
     assert len(data) is 0
 
-    head, *data, footer = run_rmlint('-T "none +ed" --hidden')
+    head, *data, footer = run_rmlint('-T "ed" --hidden')
     assert footer['total_files'] == 1
     assert len(data) is 0

@@ -74,13 +74,14 @@ static int rm_preprocess_hardlinks(RmFile *file, RmFile *prev,
         file->lint_type = RM_LINT_TYPE_HARDLINK;
     } else {
         /* bundle hardlink */
-        if(!prev->hardlinks.files) {
+        if(!prev->hardlinks) {
             /* first hardlink, set up queue */
-            prev->hardlinks.files = g_queue_new();
-            prev->hardlinks.is_head = TRUE;
+            prev->hardlinks = g_slice_new0(RmFileCluster);
+            g_queue_push_tail(&prev->hardlinks->files, prev);
+            prev->is_cluster = TRUE;
         }
-        g_queue_push_tail(prev->hardlinks.files, file);
-        file->hardlinks.hardlink_head = prev;
+        file->hardlinks = prev->hardlinks;
+        g_queue_push_tail(&prev->hardlinks->files, file);
     }
 
     /* send file to session for counting purposes (whether bundled or not) */
@@ -99,7 +100,7 @@ static int rm_preprocess_size_group(GSList *group, _UNUSED GSList *prev,
     rm_assert_gentle(group);
     if(!group->next) {
         RmFile *solo = group->data;
-        if(!solo->hardlinks.is_head) {
+        if(rm_file_filecount(solo) == 1) {
             /* group only has one member; kick it */
             solo->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
             rm_util_thread_pool_push(preprocessor->preprocess_file_pipe, solo);

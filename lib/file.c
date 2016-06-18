@@ -84,16 +84,20 @@ void rm_file_build_path(const RmFile *file, char *buf) {
 }
 
 void rm_file_destroy(RmFile *file) {
-    if(file->hardlinks.is_head && file->hardlinks.files) {
-        g_queue_free_full(file->hardlinks.files, (GDestroyNotify)rm_file_destroy);
+    if(file->hardlinks) {
+        g_queue_remove(&file->hardlinks->files, file);
+        file->hardlinks->num_prefd -= file->is_prefd;
+        if(file->hardlinks->files.length == 0) {
+            g_slice_free(RmFileCluster, file->hardlinks);
+        }
     }
 
+    if(file->digest && !file->hardlinks) {
+        rm_digest_free(file->digest);
     }
 
     if(file->ext_cksum) {
         g_free(file->ext_cksum);
-    if(file->digest && !file->hardlinks.hardlink_head) {
-        rm_digest_free(file->digest);
     }
 
     g_slice_free(RmFile, file);
@@ -130,8 +134,9 @@ RmLintType rm_file_string_to_lint_type(const char *type) {
 }
 
 gint rm_file_filecount(RmFile *file) {
-    if(file->hardlinks.is_head && file->hardlinks.files) {
-        return 1 + file->hardlinks.files->length;
+    if(file->is_cluster) {
+        rm_assert_gentle(file->hardlinks);
+        return file->hardlinks->files.length;
     } else {
         return 1;
     }

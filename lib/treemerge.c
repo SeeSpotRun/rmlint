@@ -417,13 +417,7 @@ static int rm_directory_add(RmDirectory *directory, RmFile *file) {
 
     rm_digest_sum_free(sum);
 
-    if(file->hardlinks.is_head && file->hardlinks.files) {
-        new_dupes = 1 + g_queue_get_length(file->hardlinks.files);
-    } else {
-        new_dupes = 1;
-    }
-
-    directory->dupe_count += new_dupes;
+    directory->dupe_count += rm_file_filecount(file);
     directory->prefd_files += file->is_prefd;
 
     return new_dupes;

@@ -202,10 +202,14 @@ static RmFile *rm_parrot_try_next(RmParrot *polly) {
     /* Fix the hardlink relationship */
     JsonNode *hardlink_of = json_object_get_member(object, "hardlink_of");
     if(hardlink_of != NULL) {
-        file->hardlinks.is_head = false;
-        file->hardlinks.hardlink_head = polly->last_original;
-    } else {
-        file->hardlinks.is_head = true;
+        if(!polly->last_original->hardlinks) {
+            /* first hardlink, set up queue */
+            polly->last_original->hardlinks = g_slice_new0(RmFileCluster);
+            g_queue_push_tail(&polly->last_original->hardlinks->files,
+                              polly->last_original);
+        }
+        file->hardlinks = polly->last_original->hardlinks;
+        g_queue_push_tail(&file->hardlinks->files, file);
     }
 
     return file;

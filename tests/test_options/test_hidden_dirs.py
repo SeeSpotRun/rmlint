@@ -28,7 +28,7 @@ def test_hidden():
 
     assert footer['duplicates'] == 0
     assert footer['ignored_folders'] == 2
-    assert footer['ignored_files'] == 3
+    assert footer['ignored_files'] == 1 # we don't traverse the files inside hidden folders
     assert footer['duplicate_sets'] == 0
 
 

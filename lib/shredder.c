@@ -369,19 +369,20 @@ GSList *rm_shred_group_find_original(RmCfg *cfg, GSList *files, RmLintType lint_
         file->lint_type = lint_type;
         file->is_original = FALSE;
 
-        if(file->hardlinks.is_head && file->hardlinks.files) {
+        if(file->is_cluster) {
             /* if group member has a hardlink cluster attached to it then
-             * unbundle the cluster and append it to the queue
+             * add the clustered files to the queue
              */
-            GQueue *hardlinks = file->hardlinks.files;
-            for(GList *link = hardlinks->head; link; link = link->next) {
+            for(GList *link = file->hardlinks->files.head; link; link = link->next) {
                 RmFile *link_file = link->data;
+                if(link_file == file) {
+                    continue;
+                }
                 link_file->lint_type = lint_type;
                 link_file->digest = file->digest;
                 files = g_slist_prepend(files, link_file);
             }
-            g_queue_free(hardlinks);
-            file->hardlinks.files = NULL;
+            file->is_cluster = FALSE;
         }
 
         if(lint_type == RM_LINT_TYPE_DUPE_CANDIDATE && file->is_prefd &&
@@ -634,9 +635,9 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, RmShredAddMo
         /* check if we still have only 1 unique basename... */
         if(rm_file_basenames_cmp(file, node->unique_basename) != 0) {
             node->unique_basename = NULL;
-        } else if(file->hardlinks.is_head) {
+        } else if(file == RM_FILE_HARDLINK_HEAD(file)) {
             /* also check hardlink names */
-            for(GList *iter = file->hardlinks.files->head; iter; iter = iter->next) {
+            for(GList *iter = file->hardlinks->files.head; iter; iter = iter->next) {
                 if(rm_file_basenames_cmp(iter->data, node->unique_basename) != 0) {
                     node->unique_basename = NULL;
                 }
@@ -647,8 +648,8 @@ static void rm_shred_node_add_file(RmShredNode *node, RmFile *file, RmShredAddMo
     /* update node totals */
     node->num_inodes++;
     node->num_files += rm_file_filecount(file); /* includes hardlinks */
-    node->has_pref |= file->is_prefd || file->hardlinks.has_prefd;
-    node->has_npref |= (!file->is_prefd) || file->hardlinks.has_non_prefd;
+    node->has_pref |= RM_FILE_HAS_PREFD(file);
+    node->has_npref |= RM_FILE_HAS_NPREFD(file);
     node->has_new |= file->is_new_or_has_new;
     node->has_only_ext_cksums &= !!file->ext_cksum;
 
@@ -995,11 +996,9 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredTree *tree) {
     file->is_new_or_has_new = (file->mtime >= cfg->min_mtime);
 
     /* if file has hardlinks then set file->hardlinks.has_[non_]prefd*/
-    if(file->hardlinks.is_head) {
-        for(GList *iter = file->hardlinks.files->head; iter; iter = iter->next) {
+    if(file == RM_FILE_HARDLINK_HEAD(file)) {
+        for(GList *iter = file->hardlinks->files.head; iter; iter = iter->next) {
             RmFile *link = iter->data;
-            file->hardlinks.has_non_prefd |= !(link->is_prefd);
-            file->hardlinks.has_prefd |= link->is_prefd;
             file->is_new_or_has_new |= (link->mtime >= cfg->min_mtime);
         }
     }

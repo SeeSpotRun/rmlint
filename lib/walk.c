@@ -382,7 +382,8 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
         }
 
         gboolean is_hidden = dir->is_hidden || (dir->depth > 0 && ISHIDDEN(de->d_name));
-        if(is_hidden && !walker->walk_hidden && !walker->send_hidden && !walker->send_warnings) {
+        if(is_hidden && !walker->walk_hidden && !walker->send_hidden &&
+           !walker->send_warnings) {
             /* can totally ignore hidden file/folder */
             continue;
         }

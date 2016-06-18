@@ -256,8 +256,8 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
     session->counters->shred_bytes_remaining -= file->file_size;
 
     if(file->lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-        /* bundled hardlink is counted as filtered file */
-        rm_assert_gentle(file->hardlinks.hardlink_head);
+        rm_assert_gentle(file->hardlinks);
+        /* bundled hardlink; count as filtered file but do nothing else */
     } else if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
         rm_fmt_write(file, session->formats, 1);
         session->counters->unique_bytes += file->file_size;

@@ -217,21 +217,14 @@ typedef struct RmFile {
      */
     bool is_hidden : 1;
 
+    /* True if the file is the representative of a hardlink cluster */
+    bool is_cluster : 1;
+
     /* If true, the file will be request to be pre-cached on the next read */
     bool fadvise_requested : 1;
 
-    /* If this file is the head of a hardlink cluster, the following structure
-     * contains the other hardlinked RmFile's.  This is used to avoid
-     * hashing every file within a hardlink set */
-    struct {
-        bool has_prefd : 1;
-        bool has_non_prefd : 1;
-        bool is_head : 1;
-        union {
-            GQueue *files;
-            struct RmFile *hardlink_head;
-        };
-    } hardlinks;
+    /* The hardlink cluster that this file belongs to */
+    struct RmFileCluster *hardlinks;
 
     /* The index of the path this file belongs to. */
     RmOff path_index;
@@ -291,6 +284,22 @@ typedef struct RmFile {
     RmPatternBitmask pattern_bitmask_path;
     RmPatternBitmask pattern_bitmask_basename;
 } RmFile;
+
+/* structure for hardlink clusters */
+typedef struct RmFileCluster {
+    guint num_prefd;
+    GQueue files;
+} RmFileCluster;
+
+#define RM_FILE_HARDLINK_HEAD(file) \
+    ((file->hardlinks) ? (RmFile *)file->hardlinks->files.head->data : NULL)
+#define RM_FILE_N_PREFD(file) \
+    (file->hardlinks ? file->hardlinks->num_prefd : file->is_prefd)
+#define RM_FILE_N_NPREFD(file)                                                    \
+    (file->hardlinks ? file->hardlinks->files.length - file->hardlinks->num_prefd \
+                     : !file->is_prefd)
+#define RM_FILE_HAS_PREFD(file) (!!RM_FILE_N_PREFD(file))
+#define RM_FILE_HAS_NPREFD(file) (!!RM_FILE_N_NPREFD(file))
 
 typedef enum RmTraversalType {
     RM_TRAVERSAL_NONE = 0,
@@ -354,7 +363,7 @@ void rm_dir_info_free(RmDirInfo *info);
 #define RM_DEFINE_PATH(file) RM_DEFINE_PATH_IF_NEEDED(file, true)
 
 #define RM_IS_BUNDLED_HARDLINK(file) \
-    (file->hardlinks.hardlink_head && !file->hardlinks.is_head)
+    (file->hardlinks && file != RM_FILE_HARDLINK_HEAD(file))
 
 /**
  * @brief Create a new RmFile handle.

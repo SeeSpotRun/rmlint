@@ -49,7 +49,7 @@ typedef enum RmLintType {
     RM_LINT_TYPE_BADGID,
     RM_LINT_TYPE_BADUGID,
     /* sentinel for 'other' lint: */
-    RM_LINT_TYPE_LAST_OTHER = RM_LINT_TYPE_BADUGID,
+    RM_LINT_TYPE_LAST_OTHER,
 
     /* types used by shredder for dupe match reporting;
      * may be modified by treemerge;

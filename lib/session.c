@@ -299,7 +299,7 @@ static void rm_session_pp_files_pipe(RmFile *file, RmSession *session) {
 static void rm_session_output_other_lint(const RmSession *session) {
     RmFileTables *tables = session->tables;
 
-    for(RmOff type = 0; type <= RM_LINT_TYPE_LAST_OTHER; ++type) {
+    for(RmOff type = 0; type < RM_LINT_TYPE_LAST_OTHER; ++type) {
         if(type == RM_LINT_TYPE_EMPTY_DIR) {
             /* sort empty dirs in reverse so that they can be deleted sequentially */
             tables->other_lint[type] = g_slist_sort(

@@ -226,17 +226,17 @@ int rm_file_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmCfg *cfg
     } else if(a->is_prefd != b->is_prefd) {
         return (b->is_prefd - a->is_prefd);
     } else {
-        /* Only fill in path if we have a pattern in sort_criteria */
-        bool path_needed = (cfg->pattern_cache->len > 0);
-        RM_DEFINE_PATH_IF_NEEDED(a, path_needed);
-        RM_DEFINE_PATH_IF_NEEDED(b, path_needed);
-
         for(int i = 0, regex_cursor = 0; cfg->sort_criteria[i]; i++) {
             long cmp = 0;
             switch(tolower((unsigned char)cfg->sort_criteria[i])) {
             case 'm':
                 cmp = (long)(a->mtime) - (long)(b->mtime);
                 break;
+            case 'f': {
+                RM_DEFINE_PATH(a);
+                RM_DEFINE_PATH(b);
+                cmp = g_ascii_strcasecmp(a_path, b_path);
+            } break;
             case 'a':
                 cmp = g_ascii_strcasecmp(a->folder->basename, b->folder->basename);
                 break;
@@ -258,13 +258,15 @@ int rm_file_cmp_orig_criteria(const RmFile *a, const RmFile *b, const RmCfg *cfg
                 regex_cursor++;
                 break;
             }
-            case 'r':
+            case 'r': {
+                RM_DEFINE_PATH(a);
+                RM_DEFINE_PATH(b);
                 cmp = rm_pp_cmp_by_regex(
                     g_ptr_array_index(cfg->pattern_cache, regex_cursor), regex_cursor,
                     (RmPatternBitmask *)&a->pattern_bitmask_path, a_path,
                     (RmPatternBitmask *)&b->pattern_bitmask_path, b_path);
                 regex_cursor++;
-                break;
+            } break;
             }
             if(cmp) {
                 if(isupper((unsigned char)cfg->sort_criteria[i])) {

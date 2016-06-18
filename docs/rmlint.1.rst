@@ -331,14 +331,15 @@ Original Detection Options
 
     Sort the files in a group of duplicates by one or more criteria.
 
-    - **m**: keep lowest mtime (oldest)       **M**: keep highest mtime (newest)
-    - **a**: keep first alphabetically        **A**: keep last alphabetically
-    - **p**: keep first named path            **P**: keep last named path
-    - **d**: keep path with lowest depth      **D**: keep path with highest depth
-    - **l**: keep path with shortest basename **L**: keep path with longest basename
-    - **r**: keep paths matching regex        **R**: keep path not matching regex
-    - **r**: keep paths matching regex        **R**: keep path not matching regex
-    - **x**: keep basenames matching regex    **X**: keep basenames not matching regex
+    - **m**: keep lowest mtime (oldest)         **M**: keep highest mtime (newest)
+    - **a**: keep first basename alphabetically **A**: keep last basename alphabetically
+    - **f**: keep first path alphabetically     **F**: keep last path alphabetically
+    - **p**: keep first named path              **P**: keep last named path
+    - **d**: keep path with lowest depth        **D**: keep path with highest depth
+    - **l**: keep path with shortest basename   **L**: keep path with longest basename
+    - **r**: keep paths matching regex          **R**: keep path not matching regex
+    - **r**: keep paths matching regex          **R**: keep path not matching regex
+    - **x**: keep basenames matching regex      **X**: keep basenames not matching regex
 
     Alphabetical sort will only use the basename of the file and ignore its case.
     One can have multiple criteria, e.g.: ``-S am`` will choose first alphabetically; if tied then by mtime.

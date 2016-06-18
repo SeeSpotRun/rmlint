@@ -45,7 +45,7 @@ typedef struct RmTreeMerger RmTreeMerger;
 /**
  * @brief Allocate a new RmTreeMerger structure.
  */
-RmTreeMerger *rm_tm_new(RmCfg *cfg);
+RmTreeMerger *rm_tm_new(RmCfg *cfg, RmFmtTable *formats, RmCounters *counters);
 
 /**
  * @brief Add an RmFile to the pool of (to be) investigated files.
@@ -55,7 +55,7 @@ void rm_tm_feed(RmTreeMerger *self, RmFile *file);
 /**
  * @brief Find duplicate directories through all feeded RmFiles.
  */
-void rm_tm_finish(RmTreeMerger *self, GThreadPool *results_pipe);
+void rm_tm_finish(RmTreeMerger *self);
 
 /**
  * @brief Free all memory allocated previously.

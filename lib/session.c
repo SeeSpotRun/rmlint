@@ -334,29 +334,6 @@ typedef enum RmSessionFileSource {
  * dirs as dummy files of type RM_LINT_TYPE_DUPE_DIR_CANDIDATE.
  */
 
-/* threadpipe to receive duplicate files and folders from treemerge;
- */
-static void rm_session_merge_pipe(GSList *files, RmSession *session) {
-    for(GSList *iter = files; iter; iter = iter->next) {
-        /* Hand file over to the printing module */
-        rm_fmt_write((RmFile *)iter->data, session->formats, g_slist_length(files));
-    }
-
-    /* free files: */
-    if(!session->cfg->cache_file_structs) {
-        for(GSList *iter = files; iter; iter = iter->next) {
-            RmFile *file = iter->data;
-            /* treemerge frees its own RM_LINT_TYPE_DUPE_DIR_CANDIDATE 'files' */
-            if(file->lint_type != RM_LINT_TYPE_DUPE_DIR_CANDIDATE) {
-                rm_file_destroy(file);
-            }
-        }
-    }
-    g_slist_free(files);
-
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
-}
-
 /* threadpipe to receive duplicate files and progress updates from shredder
  */
 static void rm_session_shredder_pipe(RmShredBuffer *buffer, RmSession *session) {
@@ -467,7 +444,7 @@ int rm_session_run(RmSession *session) {
         rm_mds_new(cfg->read_threads, session->mounts, cfg->fake_pathindex_as_disk);
 
     if(cfg->merge_directories) {
-        session->dir_merger = rm_tm_new(cfg);
+        session->dir_merger = rm_tm_new(cfg, session->formats, session->counters);
     }
 
     /* --- Traversal --- */
@@ -556,11 +533,7 @@ int rm_session_run(RmSession *session) {
 
     if(cfg->merge_directories) {
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_MERGE);
-        GThreadPool *merge_pipe =
-            rm_util_thread_pool_new((GFunc)rm_session_merge_pipe, session, 1, TRUE);
-
-        rm_tm_finish(session->dir_merger, merge_pipe);
-        g_thread_pool_free(merge_pipe, FALSE, TRUE);
+        rm_tm_finish(session->dir_merger);
     }
 
     rm_fmt_flush(session->formats);

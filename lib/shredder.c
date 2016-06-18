@@ -264,7 +264,9 @@ typedef struct RmShredTree {
     /* memory allocation for paranoid hashing */
     gint64 paranoid_mem_alloc;
 
-    /* if the tree hdd files, the lowest disk offset of those files */
+    gint hdd_count;
+
+    /* if the tree has hdd files, the lowest disk offset of those files */
     RmOff min_offset;
 
     /* Reference to main */
@@ -457,12 +459,17 @@ static void rm_shred_file_set_offset(RmFile *file) {
         /* already set */
         return;
     }
-    if(file->cfg->build_fiemap && rm_mds_device_is_rotational(file->disk)) {
-        RM_DEFINE_PATH(file);
-        file->disk_offset = rm_offset_get_from_path(file_path, 0, NULL);
+    if(rm_mds_device_is_rotational(file->disk)) {
+        if(file->cfg->build_fiemap) {
+            RM_DEFINE_PATH(file);
+            file->disk_offset = rm_offset_get_from_path(file_path, 0, NULL);
+        } else {
+            /* use inode number instead of disk offset */
+            file->disk_offset = file->inode;
+        }
     } else {
-        /* use inode number instead of disk offset */
-        file->disk_offset = file->inode;
+        /* prioritise ssd files that may help avoid hdd seeks */
+        file->disk_offset = -file->shred_node->tree->hdd_count;
     }
 }
 
@@ -1016,6 +1023,7 @@ static void rm_shred_file_preprocess(RmFile *file, RmShredTree *tree) {
     }
 
     rm_shred_node_add_file(&tree->head, file, RM_SHRED_HOLD);
+    tree->hdd_count += rm_mds_device_is_rotational(file->disk);
 
     if(cfg->checksum_type == RM_DIGEST_PARANOID) {
         if(rm_mds_device_is_rotational(file->disk)) {
@@ -1103,6 +1111,13 @@ static void rm_shred_preprocess_input(RmShredSession *shredder, RmFileTables *ta
     rm_shred_send(shredder, NULL, 0);
 }
 
+/**
+ * @brief prioritiser function for ssd files to help hdd files
+ **/
+gint rm_shred_ssd_prioritiser(const RmMDSTask *task_a, const RmMDSTask *task_b) {
+    return (SIGN_DIFF(task_a->offset, task_b->offset));
+}
+
 ////////////////////////////////////////////
 //           Shredder Session             //
 ////////////////////////////////////////////
@@ -1166,7 +1181,7 @@ void rm_shred_run(RmCfg *cfg, RmFileTables *tables, RmMDS *mds,
                      cfg->threads_per_hdd,
                      cfg->threads_per_ssd,
                      (RmMDSSortFunc)rm_mds_elevator_cmp,
-                     NULL);
+                     (RmMDSSortFunc)rm_shred_ssd_prioritiser);
 
     /* preprocess file groups */
     rm_shred_preprocess_input(&shredder, tables);

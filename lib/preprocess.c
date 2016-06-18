@@ -41,7 +41,6 @@ typedef struct RmPPSession {
 
 RmFileTables *rm_file_tables_new(void) {
     RmFileTables *tables = g_slice_new0(RmFileTables);
-    g_mutex_init(&tables->lock);
     return tables;
 }
 
@@ -53,7 +52,6 @@ void rm_file_tables_destroy(RmFileTables *tables) {
         tables->size_groups = NULL;
     }
 
-    g_mutex_clear(&tables->lock);
     g_slice_free(RmFileTables, tables);
 }
 

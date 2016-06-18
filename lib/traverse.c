@@ -155,6 +155,8 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
             /* not following link but need to account for it for
              * empty dir and dupe dir detection */
             rm_traverse_send(walkfile, traverser, RM_LINT_TYPE_GOODLINK, TRUE, TRUE);
+        } else {
+            rm_traverse_reg(walkfile, traverser);
         }
         break;
     case RM_WALK_DOT:
@@ -224,7 +226,7 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *result_pipe, RmMDS *mds,
     GThreadPool *walk_pipe =
         rm_util_thread_pool_new((GFunc)rm_traverse_process, &traverser, 1, TRUE);
     RmWalkSession *walker = rm_walk_session_new(mds, walk_pipe, &cfg->file_trie, mounts);
-    walker->do_links = cfg->follow_symlinks || cfg->see_symlinks;
+    walker->do_links = cfg->follow_symlinks;
     walker->see_links = cfg->see_symlinks;
     walker->send_hidden = !cfg->ignore_hidden || cfg->partial_hidden;
     walker->walk_hidden = !cfg->ignore_hidden;
@@ -236,8 +238,7 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *result_pipe, RmMDS *mds,
 
     walker->max_depth = cfg->depth;
 
-    rm_walk_paths(cfg->paths, walker, cfg->threads_per_hdd, cfg->threads_per_ssd,
-                  2);
+    rm_walk_paths(cfg->paths, walker, cfg->threads_per_hdd, cfg->threads_per_ssd, 2);
     g_thread_pool_free(walk_pipe, FALSE, TRUE);
 
     rm_userlist_destroy(traverser.userlist);

@@ -82,7 +82,6 @@ typedef enum RmLintType {
     RM_LINT_TYPE_OVERCLAMPED,  // file smaller than clamp range
     RM_LINT_TYPE_WRONG_TIME,   // file ignored due to mtime limits
     RM_LINT_TYPE_HIDDEN_FILE,  // hidden file ignored due to settings
-    RM_LINT_TYPE_SYMLINK,      // symlink not 'seen' due to settings
     RM_LINT_TYPE_EVIL_FILE,    // file on evil fs
     RM_LINT_TYPE_NO_STAT,      // file ignored because unable to stat
     RM_LINT_TYPE_OUTPUT,       // a file which is an output of rmlint

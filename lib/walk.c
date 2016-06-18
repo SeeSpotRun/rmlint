@@ -256,11 +256,16 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, guint index,
         }
         /* maybe send the link itself */
         if(walker->see_links) {
+            rm_log_info_line("seelink: %s", path);
             SEND_FILE(TRUE, RM_WALK_SL);
         }
 
         if(depth > 0 && !walker->do_links) {
             /* don't follow that link */
+            if(!walker->see_links) {
+                /* maybe warn that we skipped symlink */
+                SEND_FILE(walker->send_warnings, RM_WALK_SL);
+            }
             goto done;
         }
 
@@ -271,10 +276,6 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, guint index,
         rm_assert_gentle(targetp);
         statp = targetp;
         targetp = NULL;
-
-        /* set some flags */
-        via_symlink = TRUE;
-        is_symlink = FALSE;
     }
 
     /* handle subdirs */

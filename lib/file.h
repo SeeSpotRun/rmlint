@@ -328,21 +328,11 @@ typedef struct RmDirInfo {
     /* file count (including traversal errors and ignored files) */
     gint file_count;
 
-    /* duplicate count */
-    gint dupe_count;
-
-    /* whether we found another RmDirInfo with same count */
-    gboolean has_count_match;
-
-    /* duplicate UID's and count */
-    GHashTable *dupe_IDs;
-    gint dupe_ID_count;
-
     /* set true if we didn't traverse all subdirs
      */
     RmTraversalType traversal;
 
-    /* during traversal, create and RmFile for the dir as possible emptydir */
+    /* during traversal, create an RmFile for the dir as possible emptydir */
     RmFile *dir_as_file;
 
 } RmDirInfo;

@@ -367,8 +367,5 @@ void rm_dir_info_free(RmDirInfo *dirinfo) {
     if(dirinfo == NULL) {
         return;
     }
-    if(dirinfo->dupe_IDs) {
-        g_hash_table_unref(dirinfo->dupe_IDs);
-    }
     g_slice_free(RmDirInfo, dirinfo);
 }

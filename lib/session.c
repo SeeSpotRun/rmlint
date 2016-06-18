@@ -146,8 +146,19 @@ static int rm_session_replay(RmSession *session) {
 }
 
 static void rm_session_add_file(RmFile *file, RmSession *session) {
-    session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
+    if(file->is_hidden && session->cfg->partial_hidden &&
+       RM_IS_OTHER_LINT_TYPE(file->lint_type)) {
+        /* don't report hidden 'other' lint, it's only collected for
+         * directory matching */
+        if(file->file_size > file->hash_offset) {
+            file->lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
+        } else {
+            rm_file_destroy(file);
+            return;
+        }
+    }
     session->counters->total_files++;
+    session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
     session->counters->shred_bytes_remaining += file->file_size - file->hash_offset;
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
 }

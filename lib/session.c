@@ -316,7 +316,7 @@ static void rm_session_output_other_lint(const RmSession *session) {
             rm_fmt_write(file, session->formats, -1);
         }
 
-        if(!session->cfg->cache_file_structs && FALSE) {
+        if(!session->cfg->cache_file_structs) {
             g_slist_free_full(list, (GDestroyNotify)rm_file_destroy);
         } else {
             g_slist_free(list);

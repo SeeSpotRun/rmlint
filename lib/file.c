@@ -89,6 +89,7 @@ void rm_file_destroy(RmFile *file) {
         file->hardlinks->num_prefd -= file->is_prefd;
         if(file->hardlinks->files.length == 0) {
             g_slice_free(RmFileCluster, file->hardlinks);
+            file->hardlinks = NULL;
         }
     }
 

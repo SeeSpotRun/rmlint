@@ -126,14 +126,12 @@ char *rm_path_iter_next(RmPathIter *iter) {
     return elem_begin;
 }
 
-RmNode *rm_trie_insert(RmTrie *self, const char *path, void *value) {
+RmNode *rm_trie_insert_unlocked(RmTrie *self, const char *path, void *value) {
     rm_assert_gentle(self);
     rm_assert_gentle(path);
 
     RmPathIter iter;
     rm_path_iter_init(&iter, path);
-
-    g_mutex_lock(&self->lock);
 
     char *path_elem = NULL;
     RmNode *curr_node = self->root;
@@ -149,19 +147,23 @@ RmNode *rm_trie_insert(RmTrie *self, const char *path, void *value) {
         curr_node->data = value;
     }
 
-    g_mutex_unlock(&self->lock);
-
     return curr_node;
 }
 
-RmNode *rm_trie_search_node(RmTrie *self, const char *path) {
+RmNode *rm_trie_insert(RmTrie *self, const char *path, void *value) {
+    RmNode *result = NULL;
+    g_mutex_lock(&self->lock);
+    { result = rm_trie_insert_unlocked(self, path, value); }
+    g_mutex_unlock(&self->lock);
+    return result;
+}
+
+RmNode *rm_trie_search_node_unlocked(RmTrie *self, const char *path) {
     rm_assert_gentle(self);
     rm_assert_gentle(path);
 
     RmPathIter iter;
     rm_path_iter_init(&iter, path);
-
-    g_mutex_lock(&self->lock);
 
     char *path_elem = NULL;
     RmNode *curr_node = self->root;
@@ -169,15 +171,22 @@ RmNode *rm_trie_search_node(RmTrie *self, const char *path) {
     while(curr_node && (path_elem = rm_path_iter_next(&iter))) {
         if(curr_node->children == NULL) {
             /* Can't go any further */
-            g_mutex_unlock(&self->lock);
             return NULL;
         }
-
         curr_node = g_hash_table_lookup(curr_node->children, path_elem);
     }
-
-    g_mutex_unlock(&self->lock);
     return curr_node;
+}
+
+RmNode *rm_trie_search_node(RmTrie *self, const char *path) {
+    rm_assert_gentle(self);
+    RmNode *found = NULL;
+
+    g_mutex_lock(&self->lock);
+    { found = rm_trie_search_node_unlocked(self, path); }
+    g_mutex_unlock(&self->lock);
+
+    return found;
 }
 
 void *rm_trie_search(RmTrie *self, const char *path) {

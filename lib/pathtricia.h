@@ -94,6 +94,7 @@ RmNode *rm_node_insert_unlocked(RmTrie *trie, RmNode *parent, const char *basena
  * Search a node in the trie by path.
  */
 RmNode *rm_trie_search_node(RmTrie *self, const char *path);
+RmNode *rm_trie_search_node_unlocked(RmTrie *self, const char *path);
 
 /**
  * rm_trie_search:

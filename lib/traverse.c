@@ -240,17 +240,17 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
             break;
         case RM_WALK_PATHMAX:
             /* TODO: maybe debug report */
-            rm_log_error_line("Maximum path length reached: %s/%s",
+            rm_log_debug_line("Maximum path length reached: %s/%s",
                               walkfile->parent->path, walkfile->bname);
             lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
             break;
         case RM_WALK_DNR:
-            rm_log_error_line("Can't read dir %s (%s)", walkfile->path,
+            rm_log_warning_line("Can't read dir %s (%s)", walkfile->path,
                               g_strerror(walkfile->err));
             lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
             break;
         case RM_WALK_NS:
-            rm_log_error_line("Can't stat %s (%s)", walkfile->path,
+            rm_log_warning_line("Can't stat %s (%s)", walkfile->path,
                               g_strerror(walkfile->err));
             lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
             break;

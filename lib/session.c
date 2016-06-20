@@ -176,9 +176,14 @@ static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
         RmNode *node = file->folder;
         rm_assert_gentle(node);
         if(!node->data) {
+            // rm_log_info_line("rm_dir_info_new for traversed %s",
+            // file->folder->basename);
             node->data = rm_dir_info_new(RM_TRAVERSAL_FULL);
         }
         RmDirInfo *dirinfo = node->data;
+        if(dirinfo->traversal == RM_TRAVERSAL_NONE) {
+            dirinfo->traversal = RM_TRAVERSAL_FULL;
+        }
         dirinfo->hidden &= file->is_hidden;
         dirinfo->via_symlink &= file->via_symlink;
         rm_assert_gentle(!dirinfo->dir_as_file);
@@ -189,14 +194,17 @@ static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
     /* add file towards parent dir's file count */
     RmNode *parent = file->folder->parent;
     rm_assert_gentle(parent);
+    if(!parent->data) {
+        // rm_log_info_line("rm_dir_info_new for untraversed %s from %s",
+        //                 file->folder->parent->basename, file->folder->basename);
+        parent->data = rm_dir_info_new(RM_TRAVERSAL_NONE);
+    }
     RmDirInfo *parent_info = parent->data;
-    if(parent_info) {
-        if(RM_IS_COUNTED_FILE_TYPE(lint_type)) {
-            parent_info->file_count++;
-        }
-        if(RM_IS_UNTRAVERSED_TYPE(lint_type)) {
-            parent_info->traversal = RM_TRAVERSAL_PART;
-        }
+    if(RM_IS_COUNTED_FILE_TYPE(lint_type)) {
+        parent_info->file_count++;
+    }
+    if(RM_IS_UNTRAVERSED_TYPE(lint_type)) {
+        parent_info->traversal = RM_TRAVERSAL_PART;
     }
 
     RmCfg *cfg = session->cfg;
@@ -232,7 +240,10 @@ static int rm_session_find_emptydirs(_UNUSED RmTrie *self, RmNode *node,
         return 0;
     }
     RmFile *file = info->dir_as_file;
-    rm_assert_gentle(file);
+    if(!file) {
+        /* dir not traversed */
+        return 0;
+    }
     rm_assert_gentle(file->lint_type == RM_LINT_TYPE_DIR);
 
     if(info->file_count == 0 && info->traversal == RM_TRAVERSAL_FULL) {

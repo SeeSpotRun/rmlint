@@ -330,6 +330,8 @@ done:
  */
 #define SEND_DIR(test, ftype)             \
     if(test) {                            \
+        dir->file.err = errno;            \
+        errno = 0;                        \
         dir->file.type = ftype;           \
         rm_walk_dir_ref(dir, 1);          \
         rm_walk_send(&dir->file, walker); \

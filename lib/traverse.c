@@ -46,6 +46,29 @@ typedef struct RmTravSession {
 // ACTUAL WORK HERE //
 //////////////////////
 
+/* try to insert node by efficient rm_node_insert_unlocked() rather than
+ * top-down rm_trie_insert()
+ * a pointer to the result is stored in walkfile->user_data. */
+static RmNode *rm_traverse_get_node(RmWalkFile *walkfile, RmTravSession *traverser) {
+    // rm_log_info_line("rm_traverse_get_node for %s", walkfile->path);
+    RmNode **node = (RmNode **)&walkfile->user_data;
+    if(!*node) {
+        /* try to insert under parent node */
+        if(walkfile->parent) {
+            /* insert under parent node (recursive) */
+            RmNode *parent_node = rm_traverse_get_node(walkfile->parent, traverser);
+            if(parent_node) {
+                *node = rm_node_insert_unlocked(&traverser->cfg->file_trie, parent_node,
+                                                walkfile->bname);
+            }
+        } else {
+            /* build node from full path */
+            *node = rm_trie_insert_unlocked(&traverser->cfg->file_trie, walkfile->path);
+        }
+    }
+    return *node;
+}
+
 static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
                              RmLintType lint_type, gboolean check_output,
                              gboolean check_perms) {
@@ -82,11 +105,9 @@ static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
         }
     }
 
-    RmNode *node = rm_trie_search_node(&traverser->cfg->file_trie, walkfile->path);
-    if(!node) {
-        /* new node */
-        node = rm_trie_insert(&traverser->cfg->file_trie, walkfile->path);
-    }
+    RmNode *node = rm_traverse_get_node(walkfile, traverser);
+    rm_assert_gentle(node);
+
     RmFile *file = rm_file_new(traverser->cfg, node, walkfile->statp->st_size,
                                walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
                                lint_type, is_prefd, walkfile->index, walkfile->depth);

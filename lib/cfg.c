@@ -38,8 +38,8 @@ void rm_cfg_set_default(RmCfg *cfg) {
 
     /* Traversal options */
     cfg->depth = PATH_MAX / 2;
-    cfg->minsize = 0;
-    cfg->maxsize = G_MAXUINT64;
+    cfg->minsize = 1;
+    cfg->maxsize = (RmOff)-1;
 
     /* Lint Types */
     cfg->ignore_hidden = true;

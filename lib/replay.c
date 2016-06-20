@@ -238,12 +238,7 @@ static bool rm_parrot_check_depth(RmCfg *cfg, RmFile *file) {
 }
 
 static bool rm_parrot_check_size(RmCfg *cfg, RmFile *file) {
-    if(cfg->limits_specified == false) {
-        return true;
-    }
-
-    return ((cfg->minsize == (RmOff)-1 || cfg->minsize <= file->file_size) &&
-            (cfg->maxsize == (RmOff)-1 || file->file_size <= cfg->maxsize));
+    return (cfg->minsize <= file->file_size && file->file_size <= cfg->maxsize);
 }
 
 static bool rm_parrot_check_hidden(RmCfg *cfg, _UNUSED RmFile *file,

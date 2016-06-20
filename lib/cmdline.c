@@ -218,7 +218,6 @@ static gboolean rm_cmd_parse_limit_sizes(_UNUSED const char *option_name,
         g_prefix_error(error, _("cannot parse --size: "));
         return false;
     } else {
-        cmd->cfg->limits_specified = true;
         return true;
     }
 }

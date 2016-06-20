@@ -173,7 +173,7 @@ static RmFile *rm_parrot_try_next(RmParrot *polly) {
     }
 
     /* Fill up the RmFile */
-    RmNode *node = rm_trie_insert(&polly->session->cfg->file_trie, path, NULL);
+    RmNode *node = rm_trie_insert(&polly->session->cfg->file_trie, path);
     file = rm_file_new(polly->session->cfg, node, stat_info->st_size, stat_info->st_dev,
                        stat_info->st_ino, rm_sys_stat_mtime_seconds(stat_info), type, 0,
                        0, 0);

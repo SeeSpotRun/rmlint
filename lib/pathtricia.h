@@ -77,11 +77,10 @@ void rm_trie_destroy(RmTrie *self);
 
 /**
  * rm_trie_insert:
- * Insert a path to the trie and associate a value with it.
- * The value can be later requested with rm_trie_search*.
+ * Insert a path to the trie.
  */
-RmNode *rm_trie_insert(RmTrie *self, const char *path, void *value);
-RmNode *rm_trie_insert_unlocked(RmTrie *self, const char *path, void *value);
+RmNode *rm_trie_insert(RmTrie *self, const char *path);
+RmNode *rm_trie_insert_unlocked(RmTrie *self, const char *path);
 
 /**
  * @brief add an entry to node

@@ -85,7 +85,7 @@ static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
     RmNode *node = walkfile->dir_node;
     if(!node) {
         /* file passed directly, not traversed */
-        node = rm_trie_insert(&traverser->cfg->file_trie, walkfile->path, NULL);
+        node = rm_trie_insert(&traverser->cfg->file_trie, walkfile->path);
     } else if(walkfile->bname) {
         /* it's a file so not in the trie yet; node is the parent folder */
         node = rm_node_insert(&traverser->cfg->file_trie, walkfile->dir_node,

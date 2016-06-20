@@ -103,7 +103,6 @@ struct RmTreeMerger {
     GQueue valid_dirs;        /* Directories consisting of RmFiles only              */
 };
 
-
 ///////////////////////////////
 // DIRECTORY STRUCT HANDLING //
 ///////////////////////////////
@@ -181,7 +180,7 @@ static void rm_directory_to_file(RmTreeMerger *merger, const RmDirectory *self,
 
     /* Need to set cfg first, since set_path expects that */
     file->cfg = merger->cfg;
-    file->folder = rm_trie_insert(&merger->cfg->file_trie, self->dirname, NULL);
+    file->folder = rm_trie_insert(&merger->cfg->file_trie, self->dirname);
 
     file->lint_type = RM_LINT_TYPE_DUPE_DIR_CANDIDATE;
     file->digest = self->digest;
@@ -378,13 +377,12 @@ static void rm_tm_insert_dir(RmTreeMerger *self, RmDirectory *directory) {
 
 static void rm_directory_get_filecount(RmDirectory *directory) {
     RmDirInfo *info = directory->node ? directory->node->data : NULL;
-    if (!info || info->traversal != RM_TRAVERSAL_FULL) {
+    if(!info || info->traversal != RM_TRAVERSAL_FULL) {
         directory->file_count = -1;
-    } else  {
+    } else {
         directory->file_count = info->file_count;
     }
 }
-
 
 void rm_tm_feed(RmTreeMerger *self, RmFile *file) {
     RM_DEFINE_PATH(file);
@@ -400,7 +398,7 @@ void rm_tm_feed(RmTreeMerger *self, RmFile *file) {
         rm_directory_get_filecount(directory);
 
         /* Make the new directory known */
-        rm_trie_insert(&self->dir_tree, dirname, directory);
+        rm_trie_insert(&self->dir_tree, dirname)->data = directory;
 
         g_queue_push_head(&self->valid_dirs, directory);
 
@@ -713,7 +711,7 @@ static void rm_tm_cluster_up(RmTreeMerger *self, RmDirectory *directory) {
         parent->node = directory->node ? directory->node->parent : NULL;
         /* Get the actual file count */
         rm_directory_get_filecount(parent);
-        rm_trie_insert(&self->dir_tree, parent_dir, parent);
+        rm_trie_insert(&self->dir_tree, parent_dir)->data = parent;
 
     } else {
         g_free(parent_dir);

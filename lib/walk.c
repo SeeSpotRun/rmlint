@@ -141,7 +141,7 @@ static void rm_walk_schedule_dir(char *path, char *bname, RmStat **sp, guint ind
         if(parent_dir && bname) {
             dir->node = rm_node_insert(walker->trie, parent_dir->node, bname);
         } else {
-            dir->node = rm_trie_insert(walker->trie, path, NULL);
+            dir->node = rm_trie_insert(walker->trie, path);
         }
     }
 

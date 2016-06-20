@@ -58,7 +58,7 @@ static void rm_node_free(RmNode *node) {
     g_slice_free(RmNode, node);
 }
 
-RmNode *rm_node_insert_unlocked(RmTrie *trie, RmNode *parent, const char *basename) {
+RmNode *_rm_node_insert_unlocked(RmTrie *trie, RmNode *parent, const char *basename) {
     if(parent->children == NULL) {
         parent->children = g_hash_table_new(g_str_hash, g_str_equal);
     }
@@ -69,6 +69,12 @@ RmNode *rm_node_insert_unlocked(RmTrie *trie, RmNode *parent, const char *basena
         result->parent = parent;
         g_hash_table_insert(parent->children, result->basename, result);
     }
+    return result;
+}
+
+RmNode *rm_node_insert_unlocked(RmTrie *trie, RmNode *parent, const char *basename) {
+    RmNode *result = _rm_node_insert_unlocked(trie, parent, basename);
+    result->has_value = TRUE;
     return result;
 }
 
@@ -126,7 +132,7 @@ char *rm_path_iter_next(RmPathIter *iter) {
     return elem_begin;
 }
 
-RmNode *rm_trie_insert_unlocked(RmTrie *self, const char *path, void *value) {
+RmNode *rm_trie_insert_unlocked(RmTrie *self, const char *path) {
     rm_assert_gentle(self);
     rm_assert_gentle(path);
 
@@ -139,21 +145,16 @@ RmNode *rm_trie_insert_unlocked(RmTrie *self, const char *path, void *value) {
     /* iterate from beginning of path, finding or adding node for
      * each path element */
     while((path_elem = rm_path_iter_next(&iter))) {
-        curr_node = rm_node_insert_unlocked(self, curr_node, path_elem);
+        curr_node = _rm_node_insert_unlocked(self, curr_node, path_elem);
     }
-
-    if(curr_node != NULL) {
-        curr_node->has_value = true;
-        curr_node->data = value;
-    }
-
+    curr_node->has_value = TRUE;
     return curr_node;
 }
 
-RmNode *rm_trie_insert(RmTrie *self, const char *path, void *value) {
+RmNode *rm_trie_insert(RmTrie *self, const char *path) {
     RmNode *result = NULL;
     g_mutex_lock(&self->lock);
-    { result = rm_trie_insert_unlocked(self, path, value); }
+    { result = rm_trie_insert_unlocked(self, path); }
     g_mutex_unlock(&self->lock);
     return result;
 }

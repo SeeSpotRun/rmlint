@@ -39,7 +39,6 @@
 #include "traverse.h"
 #include "treemerge.h"
 #include "utilities.h"
-#include "xattr.h"
 
 void rm_session_init(RmSession *session) {
     memset(session, 0, sizeof(RmSession));
@@ -145,88 +144,6 @@ static int rm_session_replay(RmSession *session) {
     return EXIT_SUCCESS;
 }
 
-static void rm_session_add_file(RmFile *file, RmSession *session) {
-    if(file->is_hidden && session->cfg->partial_hidden &&
-       RM_IS_OTHER_LINT_TYPE(file->lint_type)) {
-        /* don't report hidden 'other' lint, it's only collected for
-         * directory matching */
-        if(file->file_size > file->hash_offset) {
-            file->lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
-        } else {
-            rm_file_destroy(file);
-            return;
-        }
-    }
-    session->counters->total_files++;
-    session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
-    session->counters->shred_bytes_remaining += file->file_size - file->hash_offset;
-    rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
-}
-
-/* threadpipe to receive files from traverser.
- * single threaded; assumes safe access to tables->all_files
- * and session->counters.
- */
-static void rm_session_traverse_pipe(RmFile *file, RmSession *session) {
-    rm_assert_gentle(file);
-
-    RmLintType lint_type = file->lint_type;
-    if(lint_type == RM_LINT_TYPE_DIR) {
-        /* create pathtricia data entry for dir */
-        RmNode *node = file->folder;
-        rm_assert_gentle(node);
-        if(!node->data) {
-            // rm_log_info_line("rm_dir_info_new for traversed %s",
-            // file->folder->basename);
-            node->data = rm_dir_info_new(RM_TRAVERSAL_FULL);
-        }
-        RmDirInfo *dirinfo = node->data;
-        if(dirinfo->traversal == RM_TRAVERSAL_NONE) {
-            dirinfo->traversal = RM_TRAVERSAL_FULL;
-        }
-        dirinfo->hidden &= file->is_hidden;
-        dirinfo->via_symlink &= file->via_symlink;
-        rm_assert_gentle(!dirinfo->dir_as_file);
-        dirinfo->dir_as_file = file;
-        return;
-    }
-
-    /* add file towards parent dir's file count */
-    RmNode *parent = file->folder->parent;
-    rm_assert_gentle(parent);
-    if(!parent->data) {
-        // rm_log_info_line("rm_dir_info_new for untraversed %s from %s",
-        //                 file->folder->parent->basename, file->folder->basename);
-        parent->data = rm_dir_info_new(RM_TRAVERSAL_NONE);
-    }
-    RmDirInfo *parent_info = parent->data;
-    if(RM_IS_COUNTED_FILE_TYPE(lint_type)) {
-        parent_info->file_count++;
-    }
-    if(RM_IS_UNTRAVERSED_TYPE(lint_type)) {
-        parent_info->traversal = RM_TRAVERSAL_PART;
-    }
-
-    RmCfg *cfg = session->cfg;
-    if(lint_type == RM_LINT_TYPE_HIDDEN_DIR) {
-        /* ignored hidden dir */
-        session->counters->ignored_folders++;
-    } else if(!RM_IS_REPORTING_TYPE(lint_type)) {
-        /* info only; ignore */
-        session->counters->ignored_files++;
-    } else if(lint_type == RM_LINT_TYPE_EMPTY_FILE && !cfg->find_emptyfiles) {
-        /* ignoring empty files */
-        session->counters->ignored_files++;
-    } else {
-        if(cfg->clear_xattr_fields && lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
-            rm_xattr_clear_hash(cfg, file);
-        }
-        rm_session_add_file(file, session);
-        return;
-    }
-    rm_file_destroy(file);
-}
-
 /**
  * rm_session_find_emptydirs is a bottom-up iterator over trie to find
  * empty dirs.
@@ -251,7 +168,9 @@ static int rm_session_find_emptydirs(_UNUSED RmTrie *self, RmNode *node,
         info->dir_as_file = NULL;
         file->lint_type = RM_LINT_TYPE_EMPTY_DIR;
         /* add to list */
-        rm_session_add_file(file, session);
+        session->counters->total_files++;
+        session->tables->all_files = g_slist_prepend(session->tables->all_files, file);
+        session->counters->shred_bytes_remaining += file->file_size - file->hash_offset;
         rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE);
     } else {
         /* not emptydir; add file counts to parent's file count */
@@ -471,16 +390,11 @@ int rm_session_run(RmSession *session) {
 
     /* --- Traversal --- */
 
-    /* Create a single-threaded pool to receive files from traverse */
-    GThreadPool *traverse_file_pool =
-        rm_util_thread_pool_new((GFunc)rm_session_traverse_pipe, session, 1, TRUE);
-
-    rm_traverse_tree(session->cfg, traverse_file_pool, session->mds, session->formats,
-                     session->mounts);
+    rm_traverse_tree(session->cfg, session->mds, session->tables, session->formats,
+                     session->mounts, session->counters);
     rm_log_debug_line("Traversal finished at %.3f",
                       g_timer_elapsed(session->timer, NULL));
 
-    g_thread_pool_free(traverse_file_pool, FALSE, TRUE);
     rm_fmt_set_state(session->formats, RM_PROGRESS_STATE_TRAVERSE_DONE);
 
     rm_log_debug_line(

@@ -48,8 +48,8 @@ typedef struct RmTraverseFile {
  * @param cfg the session configuration
  * @param
  */
-void rm_traverse_tree(RmCfg *cfg, GThreadPool *result_pipe, RmMDS *mds,
-                      RmFmtTable *formats, RmMountTable *mounts);
+void rm_traverse_tree(RmCfg *cfg, RmMDS *mds, RmFileTables *tables, RmFmtTable *formats,
+                      RmMountTable *mounts, RmCounters *counters);
 
 void rm_traverse_file_destroy(RmTraverseFile *file);
 

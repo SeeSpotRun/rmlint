@@ -58,8 +58,6 @@ static void rm_traverse_process_file(RmFile *file, RmTravSession *traverser) {
         RmNode *node = file->folder;
         rm_assert_gentle(node);
         if(!node->data) {
-            // rm_log_info_line("rm_dir_info_new for traversed %s",
-            // file->folder->basename);
             node->data = rm_dir_info_new(RM_TRAVERSAL_FULL);
         }
         RmDirInfo *dirinfo = node->data;
@@ -77,8 +75,6 @@ static void rm_traverse_process_file(RmFile *file, RmTravSession *traverser) {
     RmNode *parent = file->folder->parent;
     rm_assert_gentle(parent);
     if(!parent->data) {
-        // rm_log_info_line("rm_dir_info_new for untraversed %s from %s",
-        //                 file->folder->parent->basename, file->folder->basename);
         parent->data = rm_dir_info_new(RM_TRAVERSAL_NONE);
     }
     RmDirInfo *parent_info = parent->data;
@@ -129,7 +125,6 @@ static void rm_traverse_process_file(RmFile *file, RmTravSession *traverser) {
  * top-down rm_trie_insert()
  * a pointer to the result is stored in walkfile->user_data. */
 static RmNode *rm_traverse_get_node(RmWalkFile *walkfile, RmTravSession *traverser) {
-    // rm_log_info_line("rm_traverse_get_node for %s", walkfile->path);
     RmNode **node = (RmNode **)&walkfile->user_data;
     if(!*node) {
         /* try to insert under parent node */
@@ -170,7 +165,6 @@ static RmFile *rm_traverse_convert(RmWalkFile *walkfile, RmTravSession *traverse
 /**
  * threadpool pipe to receive results from walker */
 static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) {
-    rm_log_info_line("rm_traverse_process %s type %d", walkfile->path, walkfile->type);
     const RmCfg *cfg = traverser->cfg;
     RmLintType lint_type = 0;
 

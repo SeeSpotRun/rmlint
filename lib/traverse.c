@@ -44,27 +44,10 @@ typedef struct RmTravSession {
     RmFileTables *tables;
 } RmTravSession;
 
-static void rm_traverse_add_file(RmFile *file, RmTravSession *traverser) {
-    if(file->is_hidden && traverser->cfg->partial_hidden &&
-       RM_IS_OTHER_LINT_TYPE(file->lint_type)) {
-        /* don't report hidden 'other' lint, it's only collected for
-         * directory matching */
-        if(file->file_size > file->hash_offset) {
-            file->lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
-        } else {
-            rm_file_destroy(file);
-            return;
-        }
-    }
-    traverser->counters->total_files++;
-    traverser->tables->all_files = g_slist_prepend(traverser->tables->all_files, file);
-    traverser->counters->shred_bytes_remaining += file->file_size - file->hash_offset;
-    rm_fmt_set_state(traverser->formats, RM_PROGRESS_STATE_TRAVERSE);
-}
-
-/* threadpipe to receive files from traverser.
- * single threaded; assumes safe access to tables->all_files
- * and traverser->counters.
+/** Process RmFiles from traversal.
+ * Updates session counters;
+ * Builds directory file counts;
+ * Inserts file into traverser->tables->all_files if appropriate
  */
 static void rm_traverse_process_file(RmFile *file, RmTravSession *traverser) {
     rm_assert_gentle(file);
@@ -120,7 +103,23 @@ static void rm_traverse_process_file(RmFile *file, RmTravSession *traverser) {
         if(cfg->clear_xattr_fields && lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
             rm_xattr_clear_hash(cfg, file);
         }
-        rm_traverse_add_file(file, traverser);
+        if(file->is_hidden && traverser->cfg->partial_hidden &&
+           RM_IS_OTHER_LINT_TYPE(file->lint_type)) {
+            /* don't report hidden 'other' lint, it's only collected for
+             * directory matching */
+            if(file->file_size > file->hash_offset) {
+                file->lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
+            } else {
+                traverser->counters->ignored_files++;
+                rm_file_destroy(file);
+                return;
+            }
+        }
+        traverser->counters->total_files++;
+        traverser->tables->all_files =
+            g_slist_prepend(traverser->tables->all_files, file);
+        traverser->counters->shred_bytes_remaining += file->file_size - file->hash_offset;
+        rm_fmt_set_state(traverser->formats, RM_PROGRESS_STATE_TRAVERSE);
         return;
     }
     rm_file_destroy(file);
@@ -150,44 +149,10 @@ static RmNode *rm_traverse_get_node(RmWalkFile *walkfile, RmTravSession *travers
 }
 
 /**
- * @brief converts walkfile to appropriate RmFile type
+ * @brief converts walkfile to RmFile
  */
-static void rm_traverse_convert(RmWalkFile *walkfile, RmTravSession *traverser,
-                                RmLintType lint_type, gboolean check_output,
-                                gboolean check_perms) {
-    RmCfg *cfg = traverser->cfg;
-    rm_assert_gentle(walkfile->path);
-
-    /*TODO: this is double-up of rm_traverse_reg() */
-    if(check_output && rm_fmt_is_a_output(traverser->formats, walkfile->path)) {
-        lint_type = RM_LINT_TYPE_OUTPUT;
-    } else if(check_perms) {
-        RmLintType gid_check;
-        if(cfg->permissions && access(walkfile->path, cfg->permissions) == -1) {
-            /* bad permissions; ignore file */
-            lint_type = RM_LINT_TYPE_BADPERM;
-        } else if(cfg->find_badids && (gid_check = rm_util_uid_gid_check(
-                                           walkfile->statp, traverser->userlist))) {
-            lint_type = gid_check;
-        }
-    }
-
-    gboolean is_prefd = (walkfile->index >= cfg->first_prefd);
-
-    if(lint_type <= RM_LINT_TYPE_LAST_OTHER && cfg->keep_all_tagged && is_prefd) {
-        /* we can't delete 'other lint' in tagged folders */
-        lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
-    }
-
-    int mtime = rm_sys_stat_mtime_seconds(walkfile->statp);
-    if(lint_type != RM_LINT_TYPE_DUPE_CANDIDATE && lint_type != RM_LINT_TYPE_DIR) {
-        /* some filtering criteria that don't apply to dupe candidates
-         * since they might be valid "originals" */
-        if(cfg->filter_mtime && mtime < cfg->min_mtime) {
-            lint_type = RM_LINT_TYPE_WRONG_TIME;
-        }
-    }
-
+static RmFile *rm_traverse_convert(RmWalkFile *walkfile, RmTravSession *traverser,
+                                   RmLintType lint_type, int mtime, gboolean is_prefd) {
     RmNode *node = rm_traverse_get_node(walkfile, traverser);
     rm_assert_gentle(node);
 
@@ -198,116 +163,145 @@ static void rm_traverse_convert(RmWalkFile *walkfile, RmTravSession *traverser,
     file->is_hidden = walkfile->is_hidden;
     file->via_symlink = walkfile->via_symlink;
     file->is_symlink = walkfile->is_symlink;
-    rm_traverse_process_file(file, traverser);
-}
 
-static void rm_traverse_reg(RmWalkFile *walkfile, RmTravSession *traverser) {
-    if(rm_fmt_is_a_output(traverser->formats, walkfile->path)) {
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_OUTPUT, FALSE, FALSE);
-        return;
-    }
-
-    RmCfg *cfg = traverser->cfg;
-    RmLintType gid_check;
-    if(cfg->permissions && access(walkfile->path, cfg->permissions) == -1) {
-        /* bad permissions; ignore file */
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_BADPERM, FALSE, FALSE);
-        return;
-    } else if(cfg->find_badids &&
-              (gid_check = rm_util_uid_gid_check(walkfile->statp, traverser->userlist))) {
-        rm_traverse_convert(walkfile, traverser, gid_check, FALSE, FALSE);
-        return;
-    }
-
-    if(cfg->find_nonstripped && rm_util_is_nonstripped(walkfile->path, walkfile->statp)) {
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_NONSTRIPPED, FALSE, FALSE);
-        return;
-    }
-
-    RmOff file_size = walkfile->statp->st_size;
-    if(file_size == 0 && (!cfg->limits_specified || cfg->minsize > 0)) {
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_EMPTY_FILE, FALSE, FALSE);
-        return;
-    } else if(cfg->limits_specified &&
-              (file_size > cfg->maxsize ||
-               (cfg->minsize != (RmOff)-1 && file_size < cfg->minsize))) {
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_WRONG_SIZE, FALSE, FALSE);
-        return;
-    }
-    rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_DUPE_CANDIDATE, FALSE, FALSE);
+    return file;
 }
 
 /**
  * threadpool pipe to receive results from walker */
 static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) {
+    rm_log_info_line("rm_traverse_process %s type %d", walkfile->path, walkfile->type);
     const RmCfg *cfg = traverser->cfg;
+    RmLintType lint_type = 0;
 
+    /* do some screening */
     switch(walkfile->type) {
-    /* TODO: split into two switch's with uid/gid check in between */
     case RM_WALK_REG:
-        rm_traverse_reg(walkfile, traverser);
-        break;
-    case RM_WALK_DIR:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_DIR, FALSE, TRUE);
-        break;
     case RM_WALK_SL:
-        if(!cfg->see_symlinks) {
-            /* not following link but need to account for it for
-             * empty dir and dupe dir detection */
-            rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_GOODLINK, TRUE, TRUE);
-        } else {
-            rm_traverse_reg(walkfile, traverser);
-        }
-        break;
-    case RM_WALK_DOT:
-        rm_assert_gentle_not_reached();
-        break;
     case RM_WALK_OTHER:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_UNHANDLED, FALSE, TRUE);
-        break;
+    case RM_WALK_DIR:
     case RM_WALK_BADLINK:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_BADLINK, FALSE, TRUE);
-        break;
-    case RM_WALK_HIDDEN_FILE:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_HIDDEN_FILE, FALSE, FALSE);
-        break;
-    case RM_WALK_HIDDEN_DIR:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_HIDDEN_DIR, FALSE, FALSE);
-        break;
-    case RM_WALK_WHITEOUT:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_WHITEOUT, FALSE, FALSE);
-        break;
-    case RM_WALK_SKIPPED_ROOT:
-        /* TODO: maybe debug report */
-        break;
-    case RM_WALK_MAX_DEPTH:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_MAX_DEPTH, FALSE, FALSE);
-        break;
-    case RM_WALK_XDEV:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_XDEV, FALSE, FALSE);
-        break;
-    case RM_WALK_EVILFS:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_EVIL_DIR, FALSE, TRUE);
-        break;
-    case RM_WALK_DC:
-        /* TODO: maybe debug report */
-        break;
-    case RM_WALK_PATHMAX:
-        /* TODO: maybe debug report */
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_TRAVERSE_ERROR, FALSE,
-                            FALSE);
-        break;
-    case RM_WALK_DNR:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_TRAVERSE_ERROR, FALSE,
-                            FALSE);
-        break;
-    case RM_WALK_NS:
-        rm_traverse_convert(walkfile, traverser, RM_LINT_TYPE_TRAVERSE_ERROR, FALSE,
-                            FALSE);
-        break;
+        if(rm_fmt_is_a_output(traverser->formats, walkfile->path)) {
+            lint_type = RM_LINT_TYPE_OUTPUT;
+        } else if(cfg->permissions && access(walkfile->path, cfg->permissions) == -1) {
+            lint_type = RM_LINT_TYPE_BADPERM;
+        } else if(cfg->find_badids) {
+            lint_type = rm_util_uid_gid_check(walkfile->statp, traverser->userlist);
+        }
     default:
-        rm_assert_gentle_not_reached();
+        break;
     }
+
+    if(!lint_type) {
+        switch(walkfile->type) {
+        case RM_WALK_REG:
+            lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
+            break;
+        case RM_WALK_DIR:
+            lint_type = RM_LINT_TYPE_DIR;
+            break;
+        case RM_WALK_SL:
+            if(!cfg->see_symlinks) {
+                /* not following link but need to account for it for
+                 * empty dir and dupe dir detection */
+                lint_type = RM_LINT_TYPE_GOODLINK;
+            } else {
+                lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
+            }
+            break;
+        case RM_WALK_DOT:
+            rm_assert_gentle_not_reached();
+            break;
+        case RM_WALK_OTHER:
+            lint_type = RM_LINT_TYPE_UNHANDLED;
+            break;
+        case RM_WALK_BADLINK:
+            lint_type = RM_LINT_TYPE_BADLINK;
+            break;
+        case RM_WALK_HIDDEN_FILE:
+            lint_type = RM_LINT_TYPE_HIDDEN_FILE;
+            break;
+        case RM_WALK_HIDDEN_DIR:
+            lint_type = RM_LINT_TYPE_HIDDEN_DIR;
+            break;
+        case RM_WALK_WHITEOUT:
+            lint_type = RM_LINT_TYPE_WHITEOUT;
+            break;
+        case RM_WALK_SKIPPED_ROOT:
+            /* do nothing; dir was traversed elsewhere */
+            /* TODO: maybe debug report? */
+            break;
+        case RM_WALK_MAX_DEPTH:
+            lint_type = RM_LINT_TYPE_MAX_DEPTH;
+            break;
+        case RM_WALK_XDEV:
+            lint_type = RM_LINT_TYPE_XDEV;
+            break;
+        case RM_WALK_EVILFS:
+            lint_type = RM_LINT_TYPE_EVIL_DIR;
+            break;
+        case RM_WALK_DC:
+            /* do nothing; we've been there before */
+            /* TODO: maybe debug report ?*/
+            break;
+        case RM_WALK_PATHMAX:
+            /* TODO: maybe debug report */
+            rm_log_error_line("Maximum path length reached: %s/%s",
+                              walkfile->parent->path, walkfile->bname);
+            lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
+            break;
+        case RM_WALK_DNR:
+            rm_log_error_line("Can't read dir %s (%s)", walkfile->path,
+                              g_strerror(walkfile->err));
+            lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
+            break;
+        case RM_WALK_NS:
+            rm_log_error_line("Can't stat %s (%s)", walkfile->path,
+                              g_strerror(walkfile->err));
+            lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
+            break;
+        default:
+            rm_assert_gentle_not_reached();
+        }
+    }
+
+    if(lint_type) {
+        int mtime = rm_sys_stat_mtime_seconds(walkfile->statp);
+        gboolean is_prefd = (walkfile->index >= cfg->first_prefd);
+
+        if(lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+            if(walkfile->statp->st_size == 0 && cfg->find_emptyfiles) {
+                lint_type = RM_LINT_TYPE_EMPTY_FILE;
+            } else if(cfg->find_nonstripped &&
+                      rm_util_is_nonstripped(walkfile->path, walkfile->statp)) {
+                lint_type = RM_LINT_TYPE_NONSTRIPPED;
+            }
+        }
+
+        if(RM_IS_OTHER_LINT_TYPE(lint_type)) {
+            /* check for 'other lint' in tagged (prefd) folders */
+            if(cfg->keep_all_tagged && is_prefd) {
+                lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
+            } else {
+                /* time filtering criteria that don't apply to dupe candidates
+                 * since they might be valid "originals" */
+                if(cfg->filter_mtime && mtime < cfg->min_mtime) {
+                    lint_type = RM_LINT_TYPE_WRONG_TIME;
+                }
+            }
+        }
+        if(lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {
+            /* size checks */
+            RmOff file_size = walkfile->statp->st_size;
+            if(file_size > cfg->maxsize || file_size < cfg->minsize) {
+                lint_type = RM_LINT_TYPE_WRONG_SIZE;
+            }
+        }
+        RmFile *file =
+            rm_traverse_convert(walkfile, traverser, lint_type, mtime, is_prefd);
+        rm_traverse_process_file(file, traverser);
+    }
+
     rm_walk_file_free(walkfile);
 }
 

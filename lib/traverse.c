@@ -82,14 +82,10 @@ static void rm_traverse_send(RmWalkFile *walkfile, RmTravSession *traverser,
         }
     }
 
-    RmNode *node = walkfile->dir_node;
+    RmNode *node = rm_trie_search_node(&traverser->cfg->file_trie, walkfile->path);
     if(!node) {
-        /* file passed directly, not traversed */
+        /* new node */
         node = rm_trie_insert(&traverser->cfg->file_trie, walkfile->path);
-    } else if(walkfile->bname) {
-        /* it's a file so not in the trie yet; node is the parent folder */
-        node = rm_node_insert(&traverser->cfg->file_trie, walkfile->dir_node,
-                              walkfile->bname);
     }
     RmFile *file = rm_file_new(traverser->cfg, node, walkfile->statp->st_size,
                                walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
@@ -225,7 +221,7 @@ void rm_traverse_tree(RmCfg *cfg, GThreadPool *result_pipe, RmMDS *mds,
 
     GThreadPool *walk_pipe =
         rm_util_thread_pool_new((GFunc)rm_traverse_process, &traverser, 1, TRUE);
-    RmWalkSession *walker = rm_walk_session_new(mds, walk_pipe, &cfg->file_trie, mounts);
+    RmWalkSession *walker = rm_walk_session_new(mds, walk_pipe, mounts);
     walker->do_links = cfg->follow_symlinks;
     walker->see_links = cfg->see_symlinks;
     walker->send_hidden = !cfg->ignore_hidden || cfg->partial_hidden;

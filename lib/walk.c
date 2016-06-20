@@ -27,171 +27,132 @@
 #include <glib.h>
 #include <string.h>
 
-#define ISDOT(a) (a[0] == '.' && (a[1] == 0 || (a[1] == '.' && a[2] == 0)))
-#define ISHIDDEN(a) (a[0] == '.')
-
 //////////////////////
 //    Structs       //
 //////////////////////
-
-/**
- * @brief RmWalkCrumb is a backwards-linked breadcrumb trail of inodes;
- * it is used for cyclic dir detection;
- * @note linkage is many-to-one so dynamic freeing is difficult;
- * instead we keep a GAsyncQueue of allocated crumbs for freeing
- * at the end of the session;
- */
-typedef struct RmWalkCrumb {
-    struct RmWalkCrumb *parent; /* many-to-one link to parent crumb */
-    ino_t inode;
-    dev_t dev;
-} RmWalkCrumb;
 
 /**
  * RmWalkDir is a struct for passing jobs to the directory
  * traverser threadpool
  */
 typedef struct RmWalkDir {
-    RmStat *statp; /* stat(2) information about the directory */
-    char *path;
-    char *path_ptr;
-    char *bname;
-    RmNode *node;      /* where stored in pathtricia trie */
-    bool is_prefd;     /* Was this dir reached via a preferred path? */
-    bool is_hidden;    /* Is the dir hidden or reached via a hidden dir? */
-    bool via_symlink;  /* Was the dir reached (directly or indirectly) via symlink? */
-    guint index;       /* Index of path, as passed on the commadline */
+    RmWalkFile file;   /* RmWalkFile representing the directory path */
     RmMDSDevice *disk; /* md-scheduler device the buffer was pushed to */
-    gint16 depth;      /* traversal depth from root path */
-    /* shared with other RmTravJob's under the same root dir: */
-    RmWalkCrumb *crumbs; /* cycle checker */
+    gint ref_count;    /* atomic reference count:
+                        * +1 when at start of traversal;
+                        * +1 for each instance sent to result_pipe;
+                        *    reversed by rm_walk_file_free(&dir->file)
+                        * +1 for each subfile;
+                        *    reversed by rm_walk_file_free(child)
+                        * */
 } RmWalkDir;
 
-//////////////////////
-//    RmWalkCrumb   //
-//////////////////////
+////////////////////////////
+//  RmWalkDir Procedures  //
+////////////////////////////
 
 /**
- * @brief create new breadcrumb entry linked to parent crumb
+ * @brief free the struct members allocated by rm_walk_file_new()
  */
-static RmWalkCrumb *rm_walk_crumb_new(ino_t inode, dev_t dev, RmWalkCrumb *parent,
-                                      RmWalkSession *walker) {
-    RmWalkCrumb *crumb = g_slice_new(RmWalkCrumb);
-    crumb->inode = inode;
-    crumb->dev = dev;
-    crumb->parent = parent;
-
-    /* add to free list */
-    g_async_queue_push(walker->crumbs, crumb);
-    return crumb;
+static void rm_walk_file_clear(RmWalkFile *file) {
+    g_free(file->path);
+    g_free(file->bname);
+    if(file->statp) {
+        g_slice_free(RmStat, file->statp);
+    }
 }
 
 /**
- * @brief free mem allocated by rm_walk_crumb_new()
+ * @brief adjust a dir's reference count and maybe free it
+ * @param dir the dir (nullable)
+ * @param count the amount to add to the ref_count
  */
-static void rm_walk_crumb_free(RmWalkCrumb *crumb) {
-    g_slice_free(RmWalkCrumb, crumb);
+static void rm_walk_dir_ref(RmWalkDir *dir, gint count) {
+    if(!dir) {
+        return;
+    }
+    if(g_atomic_int_add(&dir->ref_count, count) + count == 0) {
+        rm_walk_dir_ref((RmWalkDir *)dir->file.parent, -1);
+        rm_walk_file_clear(&dir->file);
+        g_slice_free(RmWalkDir, dir);
+    }
 }
 
 /**
- * @brief check breadcrumb trail to see if same dir already in trail
+ * @brief check if same (dev,inode) in dir's ancestry
+ * @param dir the dir we are trying to match
+ * @param iter the current iteration being compared (nullable)
  */
-static bool rm_walk_is_cycle(dev_t dev, ino_t inode, RmWalkCrumb *crumbs) {
-    return !!crumbs && ((dev == crumbs->dev && inode == crumbs->inode) ||
-                        rm_walk_is_cycle(dev, inode, crumbs->parent));
+static bool rm_walk_is_cycle(dev_t dev, ino_t ino, RmWalkDir *iter) {
+    if(!iter) {
+        /* end of trail; no match found */
+        return false;
+    }
+    if(iter->file.statp->st_dev == dev && iter->file.statp->st_ino == ino) {
+        /* found matching inode in trail so must be a cycle */
+        return true;
+    }
+    /* search upwards recursively until match found or trail ends */
+    return rm_walk_is_cycle(dev, ino, (RmWalkDir *)iter->file.parent);
 }
 
-//////////////////////
-//    RmWalkDir     //
-//////////////////////
+#define PARENT(dir) (RmWalkDir *)dir->file.parent
+#define DEV(dir) dir->file.statp->st_dev
+#define INO(dir) dir->file.statp->st_ino
 
 /**
  * create an RmWalkDir struct for a dir and send it to the md-scheduler;
  * is freed by the threadpool worker rm_walk_dir();
  * steals the RmStat struct pointed to by **sp;
  */
-static void rm_walk_schedule_dir(char *path, char *bname, RmStat **sp, guint index,
-                                 gint depth, gboolean is_hidden, gboolean via_symlink,
-                                 RmWalkDir *parent_dir, RmWalkSession *walker) {
-    RmWalkDir *dir = g_slice_new0(RmWalkDir);
+static void rm_walk_schedule_dir(RmWalkDir *dir, RmWalkSession *walker) {
+    rm_assert_gentle(dir->file.statp);
 
-    dir->path = g_strdup(path);
-    dir->bname = g_strdup(bname);
-    dir->index = index;
-    dir->depth = depth;
-    dir->is_hidden = is_hidden;
-    dir->via_symlink = via_symlink;
-
-    /* steal the stat struct */
-    dir->statp = *sp;
-    *sp = NULL;
+    RmWalkDir *parent = PARENT(dir);
 
     /* try to inherit some stuff from parent */
-    RmWalkCrumb *crumbs = NULL;
-    if(parent_dir) {
-        crumbs = parent_dir->crumbs;
-        if(parent_dir->statp && dir->statp &&
-           parent_dir->statp->st_dev == dir->statp->st_dev &&
-           parent_dir->statp->st_ino == dir->statp->st_ino) {
-            dir->disk = parent_dir->disk;
-        }
-    }
-
-    if(walker->trie) {
-        if(parent_dir && bname) {
-            dir->node = rm_node_insert(walker->trie, parent_dir->node, bname);
-        } else {
-            dir->node = rm_trie_insert(walker->trie, path);
-        }
-    }
-
-    if(!dir->disk) {
-        dir->disk = rm_mds_device_get(walker->mds, path, dir->statp->st_dev);
-    }
-
-    dir->crumbs =
-        rm_walk_crumb_new(dir->statp->st_ino, dir->statp->st_dev, crumbs, walker);
+    gboolean same_device = parent && DEV(parent) == DEV(dir) && INO(parent) == INO(dir);
+    dir->disk = (same_device) ? parent->disk
+                              : rm_mds_device_get(walker->mds, dir->file.path, DEV(dir));
 
     rm_mds_device_ref(dir->disk, 1);
-    rm_mds_push_task(dir->disk, dir->statp->st_dev,
-                     rm_mds_device_is_rotational(dir->disk) ? -1 : 0, dir->path, dir);
+    rm_mds_push_task(dir->disk, DEV(dir), rm_mds_device_is_rotational(dir->disk) ? -1 : 0,
+                     dir->file.path, dir);
 }
 
-/**
- * free the structs allocated by rm_walk_schedule_dir()
- */
-static void rm_walk_dir_free(RmWalkDir *dir) {
-    g_free(dir->path);
-    g_free(dir->bname);
-    if(dir->statp) {
-        g_slice_free(RmStat, dir->statp);
-    }
-    g_slice_free(RmWalkDir, dir);
-}
+#undef INO
+#undef DEV
+#undef PARENT
 
-//////////////////////
-//    RmWalkFile    //
-//////////////////////
+////////////////////////////////
+//    RmWalkFile Procedures   //
+////////////////////////////////
 
 /**
  * create an RmWalkFile and send it to result_pipe;
  * steals the RmStat struct pointed to by **sp;
  * the result_pipe worker should free it via rm_walk_file_free()
  */
-static void rm_walk_file_send(RmWalkSession *walker, char *path, char *bname,
-                              RmNode *parent_node, RmStat **sp, bool is_hidden,
-                              bool is_symlink, bool via_symlink, guint index,
-                              RmWalkType type, gint16 depth) {
-    RmWalkFile *file = g_slice_new(RmWalkFile);
-    file->path = g_strdup(path);
+static RmWalkFile *rm_walk_file_new(char *path, char *bname, RmStat **sp, bool is_hidden,
+                                    bool is_symlink, bool via_symlink, guint index,
+                                    RmWalkType type, gint16 depth, RmWalkDir *parent,
+                                    RmWalkSession *walker) {
+    RmWalkFile *file = (type == RM_WALK_DIR) ? (RmWalkFile *)g_slice_new0(RmWalkDir)
+                                             : g_slice_new0(RmWalkFile);
+    file->path = (!parent || !walker->basename_only) ? g_strdup(path) : NULL;
     file->bname = g_strdup(bname);
-    file->type = type;
-    file->dir_node = parent_node;
     file->is_hidden = is_hidden;
-    file->via_symlink = via_symlink;
     file->is_symlink = is_symlink;
+    file->via_symlink = via_symlink;
     file->index = index;
+    file->type = type;
     file->depth = depth;
+    if(parent) {
+        file->parent = &parent->file;
+        rm_walk_dir_ref(parent, 1);
+    }
+    file->is_dir = (type == RM_WALK_DIR);
+
     file->err = errno;
     errno = 0;
 
@@ -199,16 +160,33 @@ static void rm_walk_file_send(RmWalkSession *walker, char *path, char *bname,
     file->statp = *sp;
     *sp = NULL;
 
+    return file;
+}
+
+////////////////////////
+//   File Processing  //
+////////////////////////
+
+static void rm_walk_send(RmWalkFile *file, RmWalkSession *walker) {
+    while(g_thread_pool_unprocessed(walker->result_pipe) > 1000) {
+        /* avoid choking the threadpool */
+        g_usleep(1000);
+    }
     rm_util_thread_pool_push(walker->result_pipe, file);
 }
 
-/* Macro for rm_walk_path() for convenience;
+/* Macros for rm_walk_path() for convenience;
  * calls rm_walk_file_send() if test evaluates to TRUE
  */
-#define SEND_FILE(test, type)                                                  \
-    if((test)) {                                                               \
-        rm_walk_file_send(walker, path, bname, parent_node, &statp, is_hidden, \
-                          is_symlink, via_symlink, index, (type), depth);      \
+#define ISDOT(a) (a[0] == '.' && (a[1] == 0 || (a[1] == '.' && a[2] == 0)))
+
+#define NEW_FILE(type)                                                               \
+    rm_walk_file_new(path, bname, &statp, is_hidden, is_symlink, via_symlink, index, \
+                     type, depth, parent_dir, walker)
+
+#define SEND_FILE(test, type)                 \
+    if(test) {                                \
+        rm_walk_send(NEW_FILE(type), walker); \
     }
 
 /**
@@ -216,21 +194,27 @@ static void rm_walk_file_send(RmWalkSession *walker, char *path, char *bname,
  * maybe send it to result_pipe;
  * if it's a dir then maybe schedule traversal of the dir;
  */
-void rm_walk_path(RmWalkSession *walker, char *path, char *bname, guint index,
-                  guint16 depth, bool is_hidden, bool via_symlink,
+void rm_walk_path(RmWalkSession *walker, char *path, char *bname, gboolean path_buf_of,
+                  guint index, guint16 depth, bool is_hidden, bool via_symlink,
                   RmWalkDir *parent_dir) {
-    RmStat *statp = NULL;
-    RmStat *targetp = NULL;
+    RmStat *statp = NULL;   /* the statp that we will send */
+    RmStat *targetp = NULL; /* if statp is a symlink, the stat of its target */
     bool is_symlink = FALSE;
 
-    RmNode *parent_node = NULL;
-    if(parent_dir) {
-        parent_node = parent_dir->node;
+    if(path_buf_of) {
+        SEND_FILE(walker->send_errors, RM_WALK_PATHMAX)
+        return;
     }
 
     /* process '.' and '..' */
     if(bname && ISDOT(bname)) {
         SEND_FILE(walker->see_dot, RM_WALK_DOT)
+        return;
+    }
+
+    if(is_hidden && !walker->walk_hidden && !walker->send_hidden &&
+       !walker->send_warnings) {
+        /* can totally ignore hidden file/folder */
         return;
     }
 
@@ -284,19 +268,18 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, guint index,
             SEND_FILE(walker->send_warnings, RM_WALK_HIDDEN_DIR)
         } else if(depth > 0 && g_hash_table_contains(walker->roots, path)) {
             SEND_FILE(walker->send_warnings, RM_WALK_SKIPPED_ROOT)
-        } else if(walker->one_device && parent_dir && parent_dir->statp &&
-                  statp->st_dev != parent_dir->statp->st_dev) {
-            rm_log_info_line("rm_walk_path: RM_WALK_XDEV");
+        } else if(walker->one_device && parent_dir &&
+                  parent_dir->file.statp->st_dev != statp->st_dev) {
             SEND_FILE(walker->send_warnings, RM_WALK_XDEV);
         } else if(rm_mounts_is_evil(walker->mounts, statp->st_dev)) {
             SEND_FILE(walker->send_warnings, RM_WALK_EVILFS);
         } else if(parent_dir &&
-                  rm_walk_is_cycle(statp->st_dev, statp->st_ino, parent_dir->crumbs)) {
+                  rm_walk_is_cycle(statp->st_dev, statp->st_ino, parent_dir)) {
             SEND_FILE(walker->send_warnings, RM_WALK_DC);
         } else {
             /* schedule dir recursion via a new thread */
-            rm_walk_schedule_dir(path, bname, &statp, index, depth + 1, is_hidden,
-                                 via_symlink, parent_dir, walker);
+            RmWalkFile *dirfile = NEW_FILE(RM_WALK_DIR);
+            rm_walk_schedule_dir((RmWalkDir *)dirfile, walker);
         }
         goto done;
     }
@@ -335,15 +318,21 @@ done:
 }
 
 #undef SEND_FILE
+#undef NEW_FILE
+#undef ISDOT
+
+////////////////////////////
+//   Directory traversal  //
+////////////////////////////
 
 /* Macro for rm_walk_dir() for convenience;
  * calls rm_walk_file_send() if test evaluates to TRUE
  */
-#define SEND_DIR(test, type)                                                         \
-    if(test) {                                                                       \
-        rm_walk_file_send(walker, dir->path, NULL, dir->node, &dir->statp,           \
-                          dir->is_hidden, FALSE, dir->via_symlink, dir->index, type, \
-                          dir->depth);                                               \
+#define SEND_DIR(test, ftype)             \
+    if(test) {                            \
+        dir->file.type = ftype;           \
+        rm_walk_dir_ref(dir, 1);          \
+        rm_walk_send(&dir->file, walker); \
     }
 
 /**
@@ -352,8 +341,8 @@ done:
  */
 static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
     char *path = g_slice_alloc(PATH_MAX * sizeof(char));
-    char *path_ptr = g_stpcpy(path, dir->path);
-
+    char *path_ptr = g_stpcpy(path, dir->file.path);
+    rm_walk_dir_ref(dir, 1);
     /* add trailing / to path */
     if(path_ptr + 2 > path + PATH_MAX) {
         SEND_DIR(walker->send_errors, RM_WALK_PATHMAX)
@@ -362,76 +351,60 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
     path_ptr = g_stpcpy(path_ptr, "/");
 
     /* open dir */
-    DIR *dirp = opendir(dir->path);
+    DIR *dirp = opendir(dir->file.path);
     if(!dirp) {
-        SEND_DIR(walker->send_errors, RM_WALK_DNR) {
-        }
+        SEND_DIR(walker->send_errors, RM_WALK_DNR)
         goto done;
     }
 
+    dir->file.is_traversed = dir->file.depth + 1 <= walker->max_depth;
     SEND_DIR(walker->send_dirs, RM_WALK_DIR);
 
-    if(dir->depth + 1 > walker->max_depth) {
-        closedir(dirp);
-        goto done;
-    }
-
-    /* iterate over dirent's in this dir */
-    struct dirent *de = NULL;
-    while(!rm_session_was_aborted() && (de = readdir(dirp)) != NULL) {
-        if(ISDOT(de->d_name) && !walker->see_dot) {
-            continue;
-        }
-
-        gboolean is_hidden = dir->is_hidden || (dir->depth > 0 && ISHIDDEN(de->d_name));
-        if(is_hidden && !walker->walk_hidden && !walker->send_hidden &&
-           !walker->send_warnings) {
-            /* can totally ignore hidden file/folder */
-            continue;
-        }
+    if(dir->file.is_traversed) {
+        /* iterate over dirent's in this dir */
+        struct dirent *de = NULL;
+        while(!rm_session_was_aborted() && (de = readdir(dirp)) != NULL) {
+            gboolean is_hidden = dir->file.is_hidden || de->d_name[0] == '.';
 
 /* build full path: */
 #if defined(HAVE_STRUCT_DIRENT_D_NAMLEN)
-        size_t dnamlen = de->d_namlen;
+            size_t dnamlen = de->d_namlen;
 #else
-        size_t dnamlen = strlen(de->d_name);
+            size_t dnamlen = strlen(de->d_name);
 #endif
-        if(path_ptr + dnamlen + 1 > path + PATH_MAX) {
-            if(walker->send_errors) {
-                rm_walk_file_send(walker, path, de->d_name, dir->node, &dir->statp,
-                                  is_hidden, FALSE, dir->via_symlink, dir->index,
-                                  RM_WALK_PATHMAX, dir->depth + 1);
+            gboolean path_buf_of = FALSE;
+            if(path_ptr + dnamlen + 1 > path + PATH_MAX) {
+                g_stpcpy(path_ptr, ".");
+                path_buf_of = TRUE;
+            } else {
+                g_stpcpy(path_ptr, de->d_name);
             }
-            continue;
-        }
-        g_stpcpy(path_ptr, de->d_name);
 
-        /* process the dirent */
-        rm_walk_path(walker, path, de->d_name, dir->index, dir->depth + 1, is_hidden,
-                     dir->via_symlink, dir);
+            /* process the dirent */
+            rm_walk_path(walker, path, de->d_name, path_buf_of, dir->file.index,
+                         dir->file.depth + 1, is_hidden, dir->file.via_symlink, dir);
+        }
     }
     closedir(dirp);
 
 done:
     g_slice_free1(PATH_MAX * sizeof(char), path);
     rm_mds_device_ref(dir->disk, -1);
-    rm_walk_dir_free(dir);
+
+    rm_walk_dir_ref(dir, -1);
 }
 
 #undef SEND_DIR
-#undef ISDOT
-#undef ISHIDDEN
 
 //////////////////////////////
 //        WALK API          //
 //////////////////////////////
 
-RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe, RmTrie *trie,
+RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe,
                                    RmMountTable *mounts) {
     RmWalkSession *walker = g_new0(RmWalkSession, 1);
     walker->mds = mds;
     walker->result_pipe = result_pipe;
-    walker->trie = trie;
     walker->mounts = mounts;
     walker->max_depth = (guint16)-1;
     return walker;
@@ -448,29 +421,27 @@ void rm_walk_paths(char **paths, RmWalkSession *walker, gint threads_per_hdd,
     rm_mds_configure(walker->mds, (RmMDSFunc)rm_walk_dir, walker, sort_interval,
                      threads_per_hdd, threads_per_ssd, rm_mds_elevator_cmp, NULL);
 
-    walker->crumbs = g_async_queue_new_full((GDestroyNotify)rm_walk_crumb_free);
-
     GHashTableIter iter;
     char *path = NULL;
     gpointer value = NULL;
     g_hash_table_iter_init(&iter, walker->roots);
     while(g_hash_table_iter_next(&iter, (gpointer)&path, &value)) {
         guint index = GPOINTER_TO_UINT(value);
-        rm_walk_path(walker, path, NULL, index, 0, FALSE, FALSE, NULL);
+        rm_walk_path(walker, path, NULL, FALSE, index, 0, FALSE, FALSE, NULL);
     }
     rm_mds_start(walker->mds);
     rm_mds_finish(walker->mds);
 
     g_hash_table_unref(walker->roots);
-    g_async_queue_unref(walker->crumbs);
     g_free(walker);
 }
 
 void rm_walk_file_free(RmWalkFile *file) {
-    g_free(file->path);
-    g_free(file->bname);
-    if(file->statp) {
-        g_slice_free(RmStat, file->statp);
+    if(file->is_dir) {
+        rm_walk_dir_ref((RmWalkDir *)file, -1);
+    } else {
+        rm_walk_dir_ref((RmWalkDir *)file->parent, -1);
+        rm_walk_file_clear(file);
+        g_slice_free(RmWalkFile, file);
     }
-    g_slice_free(RmWalkFile, file);
 }

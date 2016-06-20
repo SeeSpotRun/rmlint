@@ -36,7 +36,6 @@
  * TODO:
  * [ ] testing
  * [ ] maybe make RmWalkSession more opaque
- * [ ] option to run without pathtricia trie
  * [ ] option to run without MDS
  * [ ] ignore_root_links option
  **/
@@ -46,28 +45,27 @@
  * TODO: maybe should be more opaque?
  */
 typedef struct RmWalkSession {
-    /* walk options (set directly after creating session */
-    /* default for all bool's is FALSE;
-     * note: the sense of these options have been chosen so that default==0
-     * gives a reasonably vanilla-flavoured file walk */
-    // bool ignore_root_links;  // TODO: if true, root paths that are symlinks will be
-    // ignored
-    bool do_links;   // if true, link and/or link target will be sent for each non-root
-                     // symlink
-                     // note: root symlinks will be processed regardless
-    bool see_links;  // if true, walk returns symlinks as symlinks (else as their targets)
-    bool see_dot;    // if true, returns "." and ".." entries // TODO:
-    bool
-        send_hidden;  // if true, will send files starting with '.', else may send warning
-    bool walk_hidden;    // if true, will traverse dirs starting with '.', else may send
-                         // warning
-                         // (note: hidden root paths are always processed)
-    bool send_dirs;      // if true, sends dir paths
-    bool ignore_files;   // if true, doesn't return files
-    bool one_device;     // if true, walk won't cross filesystem boundaries
-    bool send_errors;    // if true, sends a dummy file for error RmWalkType's
-    bool send_warnings;  // if true, sends a dummy file for warning RmWalkType's
-    bool send_badlinks;  // if true, sends a symlink for each bad symlink
+    /* walk options (set directly after creating session)
+     * default for all bool's is FALSE;
+     * note: the sense of these options have been chosen so that defaults
+     * give a reasonably vanilla-flavoured file walk */
+    gboolean do_links;       // if true, link and/or link target will be sent for
+                             // each non-root symlink;
+                             // note: root symlinks will be processed regardless
+    gboolean see_links;      // if true, walk returns symlinks as symlink files
+    gboolean send_hidden;    // if true, will send hidden files, else may send warning
+    gboolean walk_hidden;    // if true, will traverse hidden dirs, else may send warning
+                             // (note: hidden root paths are always processed)
+    gboolean send_dirs;      // if true, sends dir paths
+    gboolean ignore_files;   // if true, doesn't return files
+    gboolean one_device;     // if true, walk won't cross filesystem boundaries
+    gboolean send_errors;    // if true, sends a dummy file for error RmWalkType's
+    gboolean send_warnings;  // if true, sends a dummy file for warning RmWalkType's
+    gboolean send_badlinks;  // if true, sends a symlink for each bad symlink
+    gboolean see_dot;        // if true, returns "." and ".." entries
+    gboolean basename_only;  // if true, doesn't send full path for files with a
+                             // linked parent.
+    // TODO: gboolean ignore_root_links; // if true, root path symlinks will be ignored
 
     guint16 max_depth;  // if recursing dirs, limit depth:
                         //  0 = passed paths only
@@ -76,16 +74,14 @@ typedef struct RmWalkSession {
 
     /* semi-private fields; don't access directly: */
     GHashTable *roots;
-    GAsyncQueue *crumbs;
     RmMDS *mds;
-    RmTrie *trie;
     GThreadPool *result_pipe;
     RmMountTable *mounts;
 } RmWalkSession;
 
 typedef enum RmWalkType {
     RM_WALK_REG,      // regular file
-    RM_WALK_DIR,      // dir
+    RM_WALK_DIR,      // dir (pre processing of dir's files)
     RM_WALK_SL,       // symbolic link
     RM_WALK_BADLINK,  // link with unreachable target
     RM_WALK_DOT,      // . or ..
@@ -105,28 +101,34 @@ typedef enum RmWalkType {
     RM_WALK_NS,       // couldn't stat file
 } RmWalkType;
 
+/**
+ * TODO: document me
+ */
 typedef struct RmWalkFile {
     RmWalkType type;
     char *path;
-    RmNode *dir_node;
     char *bname;
     RmStat *statp;
     guint index;
-    gint16 depth;
     int err;
+    gint16 depth;
     gboolean is_hidden : 1;
     gboolean is_symlink : 1;
     gboolean via_symlink : 1;
+    gboolean is_ref_counted : 1;
+    gboolean is_dir : 1;
+    gboolean is_traversed : 1;
+    struct RmWalkFile *parent;
+    gpointer user_data;
 } RmWalkFile;
 
 /**
  * @brief allocate a new walk session
  * @param mds an existing multi-disk scheduler
  * @param result_pipe for sending results
- * @param trie pathtricia tree; a node is inserted for each dir
  * @param mounts mount table
  */
-RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe, RmTrie *trie,
+RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe,
                                    RmMountTable *mounts);
 
 /**

@@ -354,11 +354,14 @@ done:
 static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
     rm_walk_dir_ref(dir, 1);
 
-    char *path = g_slice_alloc(walker->path_max * sizeof(char));
+    char path[walker->path_max];
+    char *last = &path[walker->path_max - 1];
+
+    rm_assert_gentle(dir->file.path);
     char *path_ptr = g_stpcpy(path, dir->file.path);
     if(*(path_ptr - 1) != G_DIR_SEPARATOR) {
         /* add trailing / to path */
-        if(path_ptr + 2 > path + walker->path_max) {
+        if(path_ptr + 1 > last) {
             SEND_DIR(walker->send_errors, RM_WALK_PATHMAX)
             goto done;
         }
@@ -388,7 +391,8 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
             size_t dnamlen = strlen(de->d_name);
 #endif
             gboolean path_buf_of = FALSE;
-            if(path_ptr + dnamlen + 1 > path + walker->path_max) {
+            if(path_ptr + dnamlen > last) {
+                *path_ptr = 0;
                 path_buf_of = TRUE;
             } else {
                 g_stpcpy(path_ptr, de->d_name);
@@ -403,8 +407,6 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
     closedir(dirp);
 
 done:
-    g_slice_free1(walker->path_max * sizeof(char), path);
-
     rm_mds_device_ref(dir->disk, -1);
     rm_walk_dir_ref(dir, -1);
 }

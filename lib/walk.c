@@ -373,10 +373,6 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
         /* iterate over dirent's in this dir */
         struct dirent *de = NULL;
         while(!rm_session_was_aborted() && (de = readdir(dirp)) != NULL) {
-            /* shortcut to skip '.' and '..' */
-            if(!walker->see_dot && ISDOT(de->d_name)) {
-                continue;
-            }
 
             gboolean is_hidden = dir->file.is_hidden || de->d_name[0] == '.';
 

@@ -198,7 +198,13 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
             lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
             break;
         case RM_WALK_DIR:
-            lint_type = RM_LINT_TYPE_DIR;
+            if(walkfile->is_traversed) {
+                lint_type = RM_LINT_TYPE_DIR;
+            } else {
+                lint_type = RM_LINT_TYPE_MAX_DEPTH;
+                rm_log_warning_line("Not descending into %s because max depth reached",
+                                    walkfile->path);
+            }
             break;
         case RM_WALK_SL:
             if(!cfg->see_symlinks) {

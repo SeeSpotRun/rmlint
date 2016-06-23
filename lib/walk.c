@@ -196,7 +196,7 @@ static void rm_walk_send(RmWalkFile *file, RmWalkSession *walker) {
  */
 void rm_walk_path(RmWalkSession *walker, char *path, char *bname, gboolean path_buf_of,
                   guint index, guint16 depth, bool is_hidden, bool via_symlink,
-                  RmWalkDir *parent_dir) {
+                  _UNUSED unsigned char d_type, RmWalkDir *parent_dir) {
     RmStat *statp = NULL;   /* the statp that we will send */
     RmStat *targetp = NULL; /* if statp is a symlink, the stat of its target */
     bool is_symlink = FALSE;
@@ -217,6 +217,12 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, gboolean path_
         /* can totally ignore hidden file/folder */
         return;
     }
+#ifdef DT_DIR
+    if(d_type == DT_DIR && is_hidden && !walker->walk_hidden) {
+        /* yay we can avoid a stat() call... */
+        SEND_FILE(walker->send_warnings, RM_WALK_HIDDEN_DIR);
+    }
+#endif
 
     /* stat the physical file: */
     statp = g_slice_new(RmStat);
@@ -240,7 +246,6 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, gboolean path_
         }
         /* maybe send the link itself */
         if(walker->see_links) {
-            rm_log_info_line("seelink: %s", path);
             SEND_FILE(TRUE, RM_WALK_SL);
         }
 
@@ -319,7 +324,6 @@ done:
 
 #undef SEND_FILE
 #undef NEW_FILE
-#undef ISDOT
 
 ////////////////////////////
 //   Directory traversal  //
@@ -369,6 +373,11 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
         /* iterate over dirent's in this dir */
         struct dirent *de = NULL;
         while(!rm_session_was_aborted() && (de = readdir(dirp)) != NULL) {
+            /* shortcut to skip '.' and '..' */
+            if(!walker->see_dot && ISDOT(de->d_name)) {
+                continue;
+            }
+
             gboolean is_hidden = dir->file.is_hidden || de->d_name[0] == '.';
 
 /* build full path: */
@@ -379,7 +388,6 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
 #endif
             gboolean path_buf_of = FALSE;
             if(path_ptr + dnamlen + 1 > path + walker->path_max) {
-                g_stpcpy(path_ptr, ".");
                 path_buf_of = TRUE;
             } else {
                 g_stpcpy(path_ptr, de->d_name);
@@ -387,19 +395,21 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
 
             /* process the dirent */
             rm_walk_path(walker, path, de->d_name, path_buf_of, dir->file.index,
-                         dir->file.depth + 1, is_hidden, dir->file.via_symlink, dir);
+                         dir->file.depth + 1, is_hidden, dir->file.via_symlink,
+                         de->d_type, dir);
         }
     }
     closedir(dirp);
 
 done:
     g_slice_free1(walker->path_max * sizeof(char), path);
-    rm_mds_device_ref(dir->disk, -1);
 
     rm_walk_dir_ref(dir, -1);
+    rm_mds_device_ref(dir->disk, -1);
 }
 
 #undef SEND_DIR
+#undef ISDOT
 
 //////////////////////////////
 //        WALK API          //
@@ -418,9 +428,26 @@ RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe,
 
 void rm_walk_paths(char **paths, RmWalkSession *walker, gint threads_per_hdd,
                    gint threads_per_ssd, gint sort_interval) {
+/* do some (BSD?) compatibility checks */
+#if defined(__FTS_COMPAT_LENGTH)
+    if(walker->path_max > USHRT_MAX) {
+        walker->path_max = USHRT_MAX;
+    }
+#endif
+
+#if defined(__FTS_COMPAT_LEVEL)
+    if(walker->max_depth > SHRT_MAX) {
+        walker->path_max = SHRT_MAX;
+    }
+#endif
+
     /* put paths into hashtable to prevent double-traversing overlapping paths */
     walker->roots = g_hash_table_new(g_str_hash, g_str_equal);
     for(guint index = 0; paths[index] != NULL; ++index) {
+        if(strlen(paths[index]) + 1 > walker->path_max) {
+            rm_log_warning_line("Path %s too long; skipping", paths[index]);
+            continue;
+        }
         g_hash_table_insert(walker->roots, paths[index], GUINT_TO_POINTER(index));
     }
 
@@ -434,7 +461,7 @@ void rm_walk_paths(char **paths, RmWalkSession *walker, gint threads_per_hdd,
     rm_assert_gentle(walker->path_max);
     while(g_hash_table_iter_next(&iter, (gpointer)&path, &value)) {
         guint index = GPOINTER_TO_UINT(value);
-        rm_walk_path(walker, path, NULL, FALSE, index, 0, FALSE, FALSE, NULL);
+        rm_walk_path(walker, path, NULL, FALSE, index, 0, FALSE, FALSE, -1, NULL);
     }
     rm_mds_start(walker->mds);
     rm_mds_finish(walker->mds);

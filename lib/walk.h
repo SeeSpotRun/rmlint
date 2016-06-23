@@ -28,16 +28,55 @@
 
 #include <glib.h>
 #include "md-scheduler.h"
+#include "session.h"
 
 /**
  * @file walk.h
- * @brief multi-threaded walk of passed path(s) using md-scheduler
- * to improve speed.
+ * @brief multi-threaded walk of an array of path(s);
+ * optionally uses md-scheduler.c for optimised multi-threading.
+ *
+ * Algorithm outline:
+ * 1. remove duplicate root paths from array.
+ * 2. process each path:
+ *      do some filtering & classifying depending on config and file type;
+ *      if the path meets criteria, send it to caller via caller's threadpool/pipe.
+ * 3. if the path is a dir, maybe schedule it for traversal via md-scheduler:
+ *      check first against config (eg max depth);
+ *      check also for cyclic dirs.
+ *
  * TODO:
  * [ ] testing
  * [ ] maybe make RmWalkSession more opaque
  * [ ] option to run without MDS
  * [ ] ignore_root_links option
+ * [ ] cross-platform compatibility:
+ *     Aim: provide similar compatibility to BSD's fts.[ch] implementation
+ *     (refer
+ *https://github.com/sahib/rmlint/blob/53bf236aa16f4e4eccdad5f41e8cbf718654d65e/lib/fts/fts.[ch])
+ *      [x] O_CLOEXEC:
+ *          fts:  required flag for open() calls if using chdir instead of building full
+ *paths;
+ *          walk: doesn't use chdir so not applicable.
+ *      [x] __FTS_COMPAT_TAILINGSLASH:
+ *          fts:  has two slightly different ways of deciding where to insert '/' between
+ *path elements
+ *          walk: checks for trailing slash and inserts only if necessary
+ *      [x] __FTS_COMPAT_LENGTH:
+ *          fts:  if defined then limits path length to USHRT_MAX.
+ *          walk: path length is configurable by caller;
+ *                if defined(__FTS_COMPAT_LENGTH) then caps this at USHRT_MAX.
+ *      [x] __FTS_COMPAT_LEVEL:
+ *          fts:  if this flag is defined then limits path depth to SHRT_MAX (32767)
+ *          walk: path depth limit is user configurable;
+ *                if this flag is defined then caps to SHRT_MAX (32767)
+ *      [~]DT_DIR :
+ *          fts:  if FTS_NOSTAT is set then skips stat(2) calls where possible
+ *          walk: saves a stat() call in one trivial case;
+ *                revisit if we decide to add a WALK_NOSTAT() option.
+ *      [ ] Whiteout:
+ *          fts:  behaviour depends on defines for DTF_HIDEW and DT_WHT
+ *          walk: TODO; have only partially 'translated' the fts logic
+ *
  **/
 
 /**
@@ -67,6 +106,9 @@ typedef struct RmWalkSession {
                              // linked parent.
     // TODO: gboolean ignore_root_links; // if true, root path symlinks will be ignored
 
+    guint path_max;  // maximum absolute path length in chars (including final null)
+                     // default = PATH_MAX
+
     guint16 max_depth;  // if recursing dirs, limit depth:
                         //  0 = passed paths only
                         //  1 = files in root dirs
@@ -74,10 +116,9 @@ typedef struct RmWalkSession {
 
     /* semi-private fields; don't access directly: */
     GHashTable *roots;
-    RmMDS *mds;
     GThreadPool *result_pipe;
     RmMountTable *mounts;
-    guint path_max;
+    RmMDS *mds;  // disk sceduler
 } RmWalkSession;
 
 typedef enum RmWalkType {
@@ -92,11 +133,10 @@ typedef enum RmWalkType {
     RM_WALK_HIDDEN_DIR,    // hidden dir ignored due to settings
     RM_WALK_WHITEOUT,      // erased file on tape drive?
     RM_WALK_SKIPPED_ROOT,  // didn't descend into dir that was a root path
-    RM_WALK_MAX_DEPTH,     // max depth reached
     RM_WALK_XDEV,          // didn't cross fs boundary
     RM_WALK_EVILFS,        // scary looking subdir
     RM_WALK_DC,            // a directory which causes cycles
-    /* error types */
+    /* error types: may not have valid stat() data: */
     RM_WALK_PATHMAX,  // path too long
     RM_WALK_DNR,      // couldn't open dir
     RM_WALK_NS,       // couldn't stat file

@@ -151,9 +151,15 @@ static RmFile *rm_traverse_convert(RmWalkFile *walkfile, RmTravSession *traverse
     RmNode *node = rm_traverse_get_node(walkfile, traverser);
     rm_assert_gentle(node);
 
-    RmFile *file = rm_file_new(traverser->cfg, node, walkfile->statp->st_size,
-                               walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
-                               lint_type, is_prefd, walkfile->index, walkfile->depth);
+    RmFile *file = NULL;
+    if(walkfile->statp) {
+        file = rm_file_new(traverser->cfg, node, walkfile->statp->st_size,
+                           walkfile->statp->st_dev, walkfile->statp->st_ino, mtime,
+                           lint_type, is_prefd, walkfile->index, walkfile->depth);
+    } else {
+        file = rm_file_new(traverser->cfg, node, 0, 0, 0, 0, lint_type, is_prefd,
+                           walkfile->index, walkfile->depth);
+    }
     rm_assert_gentle(file);
     file->is_hidden = walkfile->is_hidden;
     file->via_symlink = walkfile->via_symlink;
@@ -246,12 +252,12 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
             break;
         case RM_WALK_DNR:
             rm_log_warning_line("Can't read dir %s (%s)", walkfile->path,
-                              g_strerror(walkfile->err));
+                                g_strerror(walkfile->err));
             lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
             break;
         case RM_WALK_NS:
             rm_log_warning_line("Can't stat %s (%s)", walkfile->path,
-                              g_strerror(walkfile->err));
+                                g_strerror(walkfile->err));
             lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
             break;
         default:
@@ -260,7 +266,7 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
     }
 
     if(lint_type) {
-        int mtime = rm_sys_stat_mtime_seconds(walkfile->statp);
+        int mtime = walkfile->statp ? rm_sys_stat_mtime_seconds(walkfile->statp) : 0;
         gboolean is_prefd = (walkfile->index >= cfg->first_prefd);
 
         if(lint_type == RM_LINT_TYPE_DUPE_CANDIDATE) {

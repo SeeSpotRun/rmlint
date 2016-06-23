@@ -218,9 +218,15 @@ void rm_walk_path(RmWalkSession *walker, char *path, char *bname, gboolean path_
         return;
     }
 #ifdef DT_DIR
-    if(d_type == DT_DIR && is_hidden && !walker->walk_hidden) {
-        /* yay we can avoid a stat() call... */
-        SEND_FILE(walker->send_warnings, RM_WALK_HIDDEN_DIR);
+    if(is_hidden) {
+        if(d_type == DT_DIR && !walker->walk_hidden && !walker->send_hidden) {
+            /* yay we can avoid a stat() call... */
+            SEND_FILE(walker->send_warnings, RM_WALK_HIDDEN_DIR);
+            return;
+        } else if(d_type == DT_REG && !walker->send_hidden) {
+            SEND_FILE(walker->send_warnings, RM_WALK_HIDDEN_FILE);
+            return;
+        }
     }
 #endif
 
@@ -373,7 +379,6 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
         /* iterate over dirent's in this dir */
         struct dirent *de = NULL;
         while(!rm_session_was_aborted() && (de = readdir(dirp)) != NULL) {
-
             gboolean is_hidden = dir->file.is_hidden || de->d_name[0] == '.';
 
 /* build full path: */

@@ -1253,6 +1253,7 @@ bool rm_cmd_parse_args(int argc, char **argv, RmCfg *cfg, RmFmtTable *formats) {
         {"hash-threads"           , 't' , HIDDEN           , G_OPTION_ARG_INT64    , &cfg->hash_threads           , "Specify max. number of hasher/sorter threads"                 , "N"}   ,
         {"threads-per-hdd"        , 0   , HIDDEN           , G_OPTION_ARG_INT      , &cfg->threads_per_hdd        , "Specify number of reader threads per rotational disk"        , NULL}   ,
         {"threads-per-ssd"        , 0   , HIDDEN           , G_OPTION_ARG_INT      , &cfg->threads_per_ssd        , "Specify number of reader threads per non-rotational disk"    , NULL}   ,
+        {"pathmax"                , 0   , HIDDEN           , G_OPTION_ARG_INT      , &cfg->path_max               , "Specify maximum path length in chars"                        , NULL}   ,
         {"write-unfinished"       , 'U' , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->write_unfinished       , "Output unfinished checksums"                                 , NULL}   ,
         {"xattr-write"            , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->write_cksum_to_xattr   , "Cache checksum in file attributes"                           , NULL}   ,
         {"xattr-read"             , 0   , HIDDEN           , G_OPTION_ARG_NONE     , &cfg->read_cksum_from_xattr  , "Read cached checksums from file attributes"                  , NULL}   ,

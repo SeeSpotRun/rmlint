@@ -342,15 +342,18 @@ done:
  * calls rm_walk_path() for each valid entry
  */
 static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
-    char *path = g_slice_alloc(PATH_MAX * sizeof(char));
-    char *path_ptr = g_stpcpy(path, dir->file.path);
     rm_walk_dir_ref(dir, 1);
-    /* add trailing / to path */
-    if(path_ptr + 2 > path + PATH_MAX) {
-        SEND_DIR(walker->send_errors, RM_WALK_PATHMAX)
-        goto done;
+
+    char *path = g_slice_alloc(walker->path_max * sizeof(char));
+    char *path_ptr = g_stpcpy(path, dir->file.path);
+    if(*(path_ptr - 1) != G_DIR_SEPARATOR) {
+        /* add trailing / to path */
+        if(path_ptr + 2 > path + walker->path_max) {
+            SEND_DIR(walker->send_errors, RM_WALK_PATHMAX)
+            goto done;
+        }
+        path_ptr = g_stpcpy(path_ptr, G_DIR_SEPARATOR_S);
     }
-    path_ptr = g_stpcpy(path_ptr, "/");
 
     /* open dir */
     DIR *dirp = opendir(dir->file.path);
@@ -375,7 +378,7 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
             size_t dnamlen = strlen(de->d_name);
 #endif
             gboolean path_buf_of = FALSE;
-            if(path_ptr + dnamlen + 1 > path + PATH_MAX) {
+            if(path_ptr + dnamlen + 1 > path + walker->path_max) {
                 g_stpcpy(path_ptr, ".");
                 path_buf_of = TRUE;
             } else {
@@ -390,7 +393,7 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
     closedir(dirp);
 
 done:
-    g_slice_free1(PATH_MAX * sizeof(char), path);
+    g_slice_free1(walker->path_max * sizeof(char), path);
     rm_mds_device_ref(dir->disk, -1);
 
     rm_walk_dir_ref(dir, -1);
@@ -403,12 +406,13 @@ done:
 //////////////////////////////
 
 RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe,
-                                   RmMountTable *mounts) {
+                                   RmMountTable *mounts, guint path_max) {
     RmWalkSession *walker = g_new0(RmWalkSession, 1);
     walker->mds = mds;
     walker->result_pipe = result_pipe;
     walker->mounts = mounts;
     walker->max_depth = (guint16)-1;
+    walker->path_max = path_max; /* default */
     return walker;
 }
 
@@ -427,6 +431,7 @@ void rm_walk_paths(char **paths, RmWalkSession *walker, gint threads_per_hdd,
     char *path = NULL;
     gpointer value = NULL;
     g_hash_table_iter_init(&iter, walker->roots);
+    rm_assert_gentle(walker->path_max);
     while(g_hash_table_iter_next(&iter, (gpointer)&path, &value)) {
         guint index = GPOINTER_TO_UINT(value);
         rm_walk_path(walker, path, NULL, FALSE, index, 0, FALSE, FALSE, NULL);

@@ -317,7 +317,9 @@ void rm_traverse_tree(RmCfg *cfg, RmMDS *mds, RmFileTables *tables, RmFmtTable *
 
     GThreadPool *walk_pipe =
         rm_util_thread_pool_new((GFunc)rm_traverse_process, &traverser, 1, TRUE);
-    RmWalkSession *walker = rm_walk_session_new(mds, walk_pipe, mounts);
+
+    /* set up walk session */
+    RmWalkSession *walker = rm_walk_session_new(mds, walk_pipe, mounts, cfg->path_max);
     walker->do_links = cfg->follow_symlinks;
     walker->see_links = cfg->see_symlinks;
     walker->send_hidden = !cfg->ignore_hidden || cfg->partial_hidden;
@@ -327,11 +329,11 @@ void rm_traverse_tree(RmCfg *cfg, RmMDS *mds, RmFileTables *tables, RmFmtTable *
     walker->send_errors = TRUE;
     walker->send_warnings = TRUE;  // TODO: maybe not always
     walker->send_badlinks = cfg->find_badlinks;
-
     walker->max_depth = cfg->depth;
 
+    /* do the walk */
     rm_walk_paths(cfg->paths, walker, cfg->threads_per_hdd, cfg->threads_per_ssd, 2);
-    g_thread_pool_free(walk_pipe, FALSE, TRUE);
+    g_thread_pool_free(walk_pipe, FALSE, TRUE);  // TODO: maybe walk.c should do this?
 
     rm_userlist_destroy(traverser.userlist);
 }

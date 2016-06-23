@@ -77,6 +77,7 @@ typedef struct RmWalkSession {
     RmMDS *mds;
     GThreadPool *result_pipe;
     RmMountTable *mounts;
+    guint path_max;
 } RmWalkSession;
 
 typedef enum RmWalkType {
@@ -129,7 +130,7 @@ typedef struct RmWalkFile {
  * @param mounts mount table
  */
 RmWalkSession *rm_walk_session_new(RmMDS *mds, GThreadPool *result_pipe,
-                                   RmMountTable *mounts);
+                                   RmMountTable *mounts, guint path_max);
 
 /**
  * @brief run and free the RmWalkSession

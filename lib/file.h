@@ -343,7 +343,7 @@ void rm_dir_info_free(RmDirInfo *info);
 
 /* Defines a path variable containing the file's path */
 #define RM_DEFINE_PATH_IF_NEEDED(file, needed)           \
-    char file##_path[PATH_MAX];                          \
+    char file##_path[file->cfg->path_max];               \
     if(needed) {                                         \
         rm_file_build_path((RmFile *)file, file##_path); \
     }

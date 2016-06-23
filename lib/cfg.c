@@ -70,6 +70,7 @@ void rm_cfg_set_default(RmCfg *cfg) {
     cfg->total_mem = (RmOff)1024 * 1024 * 1024;
     /* empirical optimum for paranoid option based on limited testing */
     cfg->sweep_count = 4 * 1024;
+    cfg->path_max = PATH_MAX;
 
     cfg->skip_start_factor = 0.0;
     cfg->skip_end_factor = 1.0;

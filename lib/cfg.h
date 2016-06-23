@@ -82,6 +82,7 @@ typedef struct RmCfg {
     RmOff skip_end_offset;
 
     char **paths;
+    guint path_max;
     guint first_prefd;
     char *iwd;
     char *joined_argv;

@@ -211,8 +211,22 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
                 /* not following link but need to account for it for
                  * empty dir and dupe dir detection */
                 lint_type = RM_LINT_TYPE_GOODLINK;
+                if(!traverser->symlink_message_delivered) {
+                    rm_log_debug_line(
+                        "Not following symlink %s because of cfg\n"
+                        "\t(further symlink messages suppressed)",
+                        walkfile->path);
+                    traverser->symlink_message_delivered = TRUE;
+                }
             } else {
                 lint_type = RM_LINT_TYPE_DUPE_CANDIDATE;
+                if(!traverser->symlink_message_delivered) {
+                    rm_log_debug_line(
+                        "Following symlink %s\n"
+                        "\t(further symlink messages suppressed)",
+                        walkfile->path);
+                    traverser->symlink_message_delivered = TRUE;
+                }
             }
             break;
         case RM_WALK_DOT:
@@ -237,10 +251,10 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
             /* do nothing; dir was traversed elsewhere */
             /* TODO: maybe debug report? */
             break;
-        case RM_WALK_MAX_DEPTH:
-            lint_type = RM_LINT_TYPE_MAX_DEPTH;
-            break;
         case RM_WALK_XDEV:
+            rm_log_debug_line(
+                "Not descending into %s because it is a different filesystem",
+                walkfile->path);
             lint_type = RM_LINT_TYPE_XDEV;
             break;
         case RM_WALK_EVILFS:
@@ -248,21 +262,21 @@ static void rm_traverse_process(RmWalkFile *walkfile, RmTravSession *traverser) 
             break;
         case RM_WALK_DC:
             /* do nothing; we've been there before */
-            /* TODO: maybe debug report ?*/
+            rm_log_warning_line(_("filesystem loop detected at %s (skipping)"),
+                                walkfile->path);
             break;
         case RM_WALK_PATHMAX:
-            /* TODO: maybe debug report */
-            rm_log_debug_line("Maximum path length reached: %s/%s",
-                              walkfile->parent->path, walkfile->bname);
+            rm_log_warning_line("Maximum path length reached: %s%s", walkfile->path,
+                                walkfile->bname ? walkfile->bname : "");
             lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
             break;
         case RM_WALK_DNR:
-            rm_log_warning_line("Can't read dir %s (%s)", walkfile->path,
+            rm_log_warning_line(_("cannot read directory %s: %s"), walkfile->path,
                                 g_strerror(walkfile->err));
             lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
             break;
         case RM_WALK_NS:
-            rm_log_warning_line("Can't stat %s (%s)", walkfile->path,
+            rm_log_warning_line(_("cannot stat file %s (skipping), %s"), walkfile->path,
                                 g_strerror(walkfile->err));
             lint_type = RM_LINT_TYPE_TRAVERSE_ERROR;
             break;

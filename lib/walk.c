@@ -404,8 +404,8 @@ static void rm_walk_dir(RmWalkDir *dir, RmWalkSession *walker) {
 done:
     g_slice_free1(walker->path_max * sizeof(char), path);
 
-    rm_walk_dir_ref(dir, -1);
     rm_mds_device_ref(dir->disk, -1);
+    rm_walk_dir_ref(dir, -1);
 }
 
 #undef SEND_DIR

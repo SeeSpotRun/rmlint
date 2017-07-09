@@ -583,7 +583,7 @@ static gboolean rm_pp_handle_inode_clusters(_UNUSED gpointer key, GQueue *inode_
     }
 
     /* update counters */
-    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PREPROCESS);
+    rm_fmt_set_state(RM_PROGRESS_STATE_PREPROCESS);
 
     rm_assert_gentle(inode_cluster->length <= 1);
     if(inode_cluster->length == 1) {
@@ -619,7 +619,7 @@ static RmOff rm_pp_handler_other_lint(const RmSession *session) {
 
             num_handled++;
 
-            rm_fmt_write(file, session->cfg->formats, -1);
+            rm_fmt_write(file, -1);
         }
 
         if(!session->cfg->cache_file_structs) {
@@ -701,5 +701,5 @@ void rm_preprocess(RmSession *session) {
         "of %" RM_COUNTER_FORMAT,
         rm_counter_elapsed_time(), removed, total_files);
 
-    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PREPROCESS);
+    rm_fmt_set_state(RM_PROGRESS_STATE_PREPROCESS);
 }

@@ -57,7 +57,7 @@ void rm_shred_run(RmSession *session);
  * - the is_prefd flag of the file
  * - otherwise sort by criteria
  */
-void rm_shred_forward_to_output(RmSession *session, GQueue *group);
+void rm_shred_forward_to_output(GQueue *group);
 
 /**
  * @brief Find the original file in a group and mark it.

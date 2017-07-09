@@ -35,7 +35,7 @@ typedef struct RmFmtHandlerTimestamp {
     RmFmtHandler parent;
 } RmFmtHandlerSummary;
 
-static void rm_fmt_prog(RmSession *session,
+static void rm_fmt_prog(_UNUSED RmSession *session,
                         _UNUSED RmFmtHandler *parent,
                         _UNUSED FILE *out,
                         RmFmtProgressState state) {
@@ -43,7 +43,7 @@ static void rm_fmt_prog(RmSession *session,
         return;
     }
 
-    if(rm_fmt_get_config_value(session->cfg->formats, "stamp", "iso8601")) {
+    if(rm_fmt_get_config_value("stamp", "iso8601")) {
         char time_buf[256];
         memset(time_buf, 0, sizeof(time_buf));
         rm_iso8601_format(time(NULL), time_buf, sizeof(time_buf));

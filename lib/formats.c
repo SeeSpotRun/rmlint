@@ -31,6 +31,33 @@
 #include "file.h"
 #include "formats.h"
 
+/* maps handler name to RmFmtHandler struct defined in formats/???.c
+ * e.g. "progressbar" maps to formats/progress.c/PROGRESS_HANDLER_IMPL */
+static GHashTable *RM_FMT_NAME_TO_HANDLER;
+
+/* set of output paths (used to check whether a path is an output). */
+static GHashTable *RM_FMT_PATHS;
+
+/* set of handler names (used to check whether a specific handler is in play). */
+static GHashTable *RM_FMT_ACTIVE_HANDLER_NAMES;
+
+/* map of maps; key is formatter name, value is a hashtable of key-value pairs */
+static GHashTable *RM_FMT_CONFIG;
+
+/* list of all active handlers (in order) */
+static GQueue RM_FMT_HANDLERS;
+
+/* lock to prevent simultaneous access to various session->counters */
+/* TODO: move to new RmCounters struct somewhere... */
+static GRecMutex RM_FMT_STATE_MTX;
+
+/* the RmLint session megalith */
+/* TODO: make formats independent of this */
+static RmSession *RM_FMT_SESSION;
+
+/* Group of RmFiles that will be cached until exit */
+static GQueue RM_FMT_GROUPS;
+
 /* A group of output files.
  * These are only created when caching to the end of the run is requested.
  * Otherwise, files are directly outputed and not stored in groups.
@@ -46,8 +73,8 @@ static RmFmtGroup *rm_fmt_group_new(void) {
     return self;
 }
 
-static void rm_fmt_group_destroy(RmFmtTable *self, RmFmtGroup *group) {
-    RmCfg *cfg = self->session->cfg;
+static void rm_fmt_group_destroy(RmFmtGroup *group) {
+    RmCfg *cfg = RM_FMT_SESSION->cfg;
 
     /* Special case: treemerge.c has to manage memory itself,
      *               since it omits some files or may even print them twice.
@@ -87,78 +114,69 @@ static void rm_fmt_handler_free(RmFmtHandler *handler) {
     g_free(handler);
 }
 
-RmFmtTable *rm_fmt_open(RmSession *session) {
-    RmFmtTable *self = g_slice_new0(RmFmtTable);
+void rm_fmt_open(RmSession *session) {
+    RM_FMT_NAME_TO_HANDLER = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
 
-    self->name_to_handler = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
+    RM_FMT_PATHS = g_hash_table_new(g_str_hash, g_str_equal);
+    RM_FMT_ACTIVE_HANDLER_NAMES = g_hash_table_new(g_str_hash, g_str_equal);
 
-    self->paths = g_hash_table_new(g_str_hash, g_str_equal);
-    self->active_handler_names = g_hash_table_new(g_str_hash, g_str_equal);
+    RM_FMT_CONFIG = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                          (GDestroyNotify)g_hash_table_unref);
 
-    self->config = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
-                                         (GDestroyNotify)g_hash_table_unref);
+    g_queue_init(&RM_FMT_HANDLERS);
 
-    g_queue_init(&self->handlers);
-
-    self->session = session;
-    g_queue_init(&self->groups);
-    g_rec_mutex_init(&self->state_mtx);
+    RM_FMT_SESSION = session;
+    g_queue_init(&RM_FMT_GROUPS);
 
     extern RmFmtHandler *PROGRESS_HANDLER;
-    rm_fmt_register(self, PROGRESS_HANDLER);
+    rm_fmt_register(PROGRESS_HANDLER);
 
     extern RmFmtHandler *CSV_HANDLER;
-    rm_fmt_register(self, CSV_HANDLER);
+    rm_fmt_register(CSV_HANDLER);
 
     extern RmFmtHandler *PRETTY_HANDLER;
-    rm_fmt_register(self, PRETTY_HANDLER);
+    rm_fmt_register(PRETTY_HANDLER);
 
     extern RmFmtHandler *SH_SCRIPT_HANDLER;
-    rm_fmt_register(self, SH_SCRIPT_HANDLER);
+    rm_fmt_register(SH_SCRIPT_HANDLER);
 
     extern RmFmtHandler *SUMMARY_HANDLER;
-    rm_fmt_register(self, SUMMARY_HANDLER);
+    rm_fmt_register(SUMMARY_HANDLER);
 
     extern RmFmtHandler *TIMESTAMP_HANDLER;
-    rm_fmt_register(self, TIMESTAMP_HANDLER);
+    rm_fmt_register(TIMESTAMP_HANDLER);
 
     extern RmFmtHandler *JSON_HANDLER;
-    rm_fmt_register(self, JSON_HANDLER);
+    rm_fmt_register(JSON_HANDLER);
 
     extern RmFmtHandler *PY_HANDLER;
-    rm_fmt_register(self, PY_HANDLER);
+    rm_fmt_register(PY_HANDLER);
 
     extern RmFmtHandler *FDUPES_HANDLER;
-    rm_fmt_register(self, FDUPES_HANDLER);
+    rm_fmt_register(FDUPES_HANDLER);
 
     extern RmFmtHandler *UNIQUES_HANDLER;
-    rm_fmt_register(self, UNIQUES_HANDLER);
+    rm_fmt_register(UNIQUES_HANDLER);
 
     extern RmFmtHandler *NULL_HANDLER;
-    rm_fmt_register(self, NULL_HANDLER);
+    rm_fmt_register(NULL_HANDLER);
 
     extern RmFmtHandler *STATS_HANDLER;
-    rm_fmt_register(self, STATS_HANDLER);
+    rm_fmt_register(STATS_HANDLER);
 
     extern RmFmtHandler *EQUAL_HANDLER;
-    rm_fmt_register(self, EQUAL_HANDLER);
+    rm_fmt_register(EQUAL_HANDLER);
 
     extern RmFmtHandler *HASH_HANDLER;
-    rm_fmt_register(self, HASH_HANDLER);
-
-    return self;
+    rm_fmt_register(HASH_HANDLER);
 }
 
-int rm_fmt_len(RmFmtTable *self) {
-    if(self == NULL) {
-        return -1;
-    } else {
-        return self->handlers.length;
-    }
+int rm_fmt_len(void) {
+    return RM_FMT_HANDLERS.length;
 }
 
-bool rm_fmt_is_valid_key(RmFmtTable *self, const char *formatter, const char *key) {
-    RmFmtHandler *handler = g_hash_table_lookup(self->name_to_handler, formatter);
+bool rm_fmt_is_valid_key(const char *formatter, const char *key) {
+    RmFmtHandler *handler = g_hash_table_lookup(RM_FMT_NAME_TO_HANDLER, formatter);
     if(handler == NULL) {
         return false;
     }
@@ -172,39 +190,39 @@ bool rm_fmt_is_valid_key(RmFmtTable *self, const char *formatter, const char *ke
     return false;
 }
 
-void rm_fmt_clear(RmFmtTable *self) {
-    if(rm_fmt_len(self) <= 0) {
+void rm_fmt_clear(void) {
+    if(rm_fmt_len() <= 0) {
         return;
     }
-    g_hash_table_remove_all(self->paths);
-    g_hash_table_remove_all(self->active_handler_names);
-    rm_util_queue_foreach_remove(&self->handlers, (RmRFunc)rm_fmt_handler_free, NULL);
-    g_hash_table_remove_all(self->config);
+    g_hash_table_remove_all(RM_FMT_PATHS);
+    g_hash_table_remove_all(RM_FMT_ACTIVE_HANDLER_NAMES);
+    rm_util_queue_foreach_remove(&RM_FMT_HANDLERS, (RmRFunc)rm_fmt_handler_free, NULL);
+    g_hash_table_remove_all(RM_FMT_CONFIG);
 }
 
-void rm_fmt_register(RmFmtTable *self, RmFmtHandler *handler) {
-    g_hash_table_insert(self->name_to_handler, (char *)handler->name, handler);
+void rm_fmt_register(RmFmtHandler *handler) {
+    g_hash_table_insert(RM_FMT_NAME_TO_HANDLER, (char *)handler->name, handler);
     g_mutex_init(&handler->print_mtx);
 }
 
-#define RM_FMT_CALLBACK(func, ...)                               \
-    if(func) {                                                   \
-        g_mutex_lock(&handler->print_mtx);                       \
-        {                                                        \
-            FILE *file = handler->file;                          \
-            if(!handler->was_initialized && handler->head) {     \
-                if(handler->head) {                              \
-                    handler->head(self->session, handler, file); \
-                }                                                \
-                handler->was_initialized = true;                 \
-            }                                                    \
-            func(self->session, handler, file, ##__VA_ARGS__);   \
-        }                                                        \
-        g_mutex_unlock(&handler->print_mtx);                     \
+#define RM_FMT_CALLBACK(func, ...)                                \
+    if(func) {                                                    \
+        g_mutex_lock(&handler->print_mtx);                        \
+        {                                                         \
+            FILE *file = handler->file;                           \
+            if(!handler->was_initialized && handler->head) {      \
+                if(handler->head) {                               \
+                    handler->head(RM_FMT_SESSION, handler, file); \
+                }                                                 \
+                handler->was_initialized = true;                  \
+            }                                                     \
+            func(RM_FMT_SESSION, handler, file, ##__VA_ARGS__);   \
+        }                                                         \
+        g_mutex_unlock(&handler->print_mtx);                      \
     }
 
-bool rm_fmt_add(RmFmtTable *self, const char *handler_name, const char *path) {
-    RmFmtHandler *new_handler = g_hash_table_lookup(self->name_to_handler, handler_name);
+bool rm_fmt_add(const char *handler_name, const char *path) {
+    RmFmtHandler *new_handler = g_hash_table_lookup(RM_FMT_NAME_TO_HANDLER, handler_name);
     if(new_handler == NULL) {
         rm_log_warning_line(_("No such new_handler with this name: %s"), handler_name);
         return false;
@@ -268,15 +286,15 @@ bool rm_fmt_add(RmFmtTable *self, const char *handler_name, const char *path) {
     }
 
     new_handler_copy->file = file_handle;
-    g_hash_table_add(self->paths, new_handler_copy->path);
-    g_hash_table_add(self->active_handler_names, (char *)new_handler_copy->name);
-    g_queue_push_tail(&self->handlers, new_handler_copy);
+    g_hash_table_add(RM_FMT_PATHS, new_handler_copy->path);
+    g_hash_table_add(RM_FMT_ACTIVE_HANDLER_NAMES, (char *)new_handler_copy->name);
+    g_queue_push_tail(&RM_FMT_HANDLERS, new_handler_copy);
 
     return true;
 }
 
-static void rm_fmt_write_impl(RmFile *result, RmFmtTable *self) {
-    for(GList *iter = self->handlers.head; iter; iter = iter->next) {
+static void rm_fmt_write_impl(RmFile *result) {
+    for(GList *iter = RM_FMT_HANDLERS.head; iter; iter = iter->next) {
         RmFmtHandler *handler = iter->data;
         RM_FMT_CALLBACK(handler->elem, result);
     }
@@ -293,8 +311,8 @@ static gint rm_fmt_rank_size(const RmFmtGroup *ga, const RmFmtGroup *gb) {
     return SIGN_DIFF(sa, sb);
 }
 
-static gint rm_fmt_rank(const RmFmtGroup *ga, const RmFmtGroup *gb, RmFmtTable *self) {
-    const char *rank_order = self->session->cfg->rank_criteria;
+static gint rm_fmt_rank(const RmFmtGroup *ga, const RmFmtGroup *gb) {
+    const char *rank_order = RM_FMT_SESSION->cfg->rank_criteria;
 
     RmFile *fa = ga->files.head->data;
     RmFile *fb = gb->files.head->data;
@@ -340,100 +358,95 @@ static gint rm_fmt_rank(const RmFmtGroup *ga, const RmFmtGroup *gb, RmFmtTable *
     return 0;
 }
 
-static void rm_fmt_write_group(RmFmtGroup *group, RmFmtTable *self) {
-    g_queue_foreach(&group->files, (GFunc)rm_fmt_write_impl, self);
+static void rm_fmt_write_group(RmFmtGroup *group) {
+    g_queue_foreach(&group->files, (GFunc)rm_fmt_write_impl, NULL);
 }
 
-void rm_fmt_flush(RmFmtTable *self) {
-    RmCfg *cfg = self->session->cfg;
+void rm_fmt_flush(void) {
+    RmCfg *cfg = RM_FMT_SESSION->cfg;
     if(!cfg->cache_file_structs) {
         return;
     }
 
     if(*(cfg->rank_criteria)) {
-        g_queue_sort(&self->groups, (GCompareDataFunc)rm_fmt_rank, self);
+        g_queue_sort(&RM_FMT_GROUPS, (GCompareDataFunc)rm_fmt_rank, NULL);
     }
 
-    g_queue_foreach(&self->groups, (GFunc)rm_fmt_write_group, self);
+    g_queue_foreach(&RM_FMT_GROUPS, (GFunc)rm_fmt_write_group, NULL);
 }
 
-void rm_fmt_close(RmFmtTable *self) {
-    for(GList *iter = self->groups.head; iter; iter = iter->next) {
+void rm_fmt_close(void) {
+    for(GList *iter = RM_FMT_GROUPS.head; iter; iter = iter->next) {
         RmFmtGroup *group = iter->data;
-        rm_fmt_group_destroy(self, group);
+        rm_fmt_group_destroy(group);
     }
 
-    g_queue_clear(&self->groups);
+    g_queue_clear(&RM_FMT_GROUPS);
 
-    for(GList *iter = self->handlers.head; iter; iter = iter->next) {
+    for(GList *iter = RM_FMT_HANDLERS.head; iter; iter = iter->next) {
         RmFmtHandler *handler = iter->data;
         RM_FMT_CALLBACK(handler->foot);
         fclose(handler->file);
         g_mutex_clear(&handler->print_mtx);
     }
 
-    g_hash_table_unref(self->name_to_handler);
-    g_hash_table_unref(self->paths);
-    g_hash_table_unref(self->config);
-    g_hash_table_unref(self->active_handler_names);
-    rm_util_queue_foreach_remove(&self->handlers, (RmRFunc)rm_fmt_handler_free, NULL);
-
-    g_rec_mutex_clear(&self->state_mtx);
-    g_slice_free(RmFmtTable, self);
+    g_hash_table_unref(RM_FMT_NAME_TO_HANDLER);
+    g_hash_table_unref(RM_FMT_PATHS);
+    g_hash_table_unref(RM_FMT_CONFIG);
+    g_hash_table_unref(RM_FMT_ACTIVE_HANDLER_NAMES);
+    rm_util_queue_foreach_remove(&RM_FMT_HANDLERS, (RmRFunc)rm_fmt_handler_free, NULL);
 }
 
-void rm_fmt_write(RmFile *result, RmFmtTable *self, gint64 twin_count) {
-    bool direct = !(self->session->cfg->cache_file_structs);
+void rm_fmt_write(RmFile *result, gint64 twin_count) {
+    bool direct = !(RM_FMT_SESSION->cfg->cache_file_structs);
 
     result->twin_count = twin_count;
 
     if(direct) {
-        rm_fmt_write_impl(result, self);
+        rm_fmt_write_impl(result);
     } else {
-        if(result->is_original || self->groups.length == 0) {
-            g_queue_push_tail(&self->groups, rm_fmt_group_new());
+        if(result->is_original || RM_FMT_GROUPS.length == 0) {
+            g_queue_push_tail(&RM_FMT_GROUPS, rm_fmt_group_new());
         }
 
-        RmFmtGroup *group = self->groups.tail->data;
-        group->index = self->groups.length - 1;
+        RmFmtGroup *group = RM_FMT_GROUPS.tail->data;
+        group->index = RM_FMT_GROUPS.length - 1;
 
         g_queue_push_tail(&group->files, result);
     }
 }
 
-void rm_fmt_lock_state(RmFmtTable *self) {
-    g_rec_mutex_lock(&self->state_mtx);
+void rm_fmt_lock_state(void) {
+    g_rec_mutex_lock(&RM_FMT_STATE_MTX);
 }
 
-void rm_fmt_unlock_state(RmFmtTable *self) {
-    g_rec_mutex_unlock(&self->state_mtx);
+void rm_fmt_unlock_state(void) {
+    g_rec_mutex_unlock(&RM_FMT_STATE_MTX);
 }
 
-void rm_fmt_set_state(RmFmtTable *self, RmFmtProgressState state) {
-    rm_fmt_lock_state(self);
+void rm_fmt_set_state(RmFmtProgressState state) {
+    rm_fmt_lock_state();
     {
-        for(GList *iter = self->handlers.head; iter; iter = iter->next) {
+        for(GList *iter = RM_FMT_HANDLERS.head; iter; iter = iter->next) {
             RmFmtHandler *handler = iter->data;
             RM_FMT_CALLBACK(handler->prog, state);
         }
     }
-    rm_fmt_unlock_state(self);
+    rm_fmt_unlock_state();
 }
 
-void rm_fmt_set_config_value(RmFmtTable *self, const char *formatter, const char *key,
-                             const char *value) {
-    GHashTable *key_to_vals = g_hash_table_lookup(self->config, formatter);
+void rm_fmt_set_config_value(const char *formatter, const char *key, const char *value) {
+    GHashTable *key_to_vals = g_hash_table_lookup(RM_FMT_CONFIG, formatter);
 
     if(key_to_vals == NULL) {
         key_to_vals = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-        g_hash_table_insert(self->config, (char *)g_strdup(formatter), key_to_vals);
+        g_hash_table_insert(RM_FMT_CONFIG, (char *)g_strdup(formatter), key_to_vals);
     }
     g_hash_table_insert(key_to_vals, (char *)key, (char *)value);
 }
 
-const char *rm_fmt_get_config_value(RmFmtTable *self, const char *formatter,
-                                    const char *key) {
-    GHashTable *key_to_vals = g_hash_table_lookup(self->config, formatter);
+const char *rm_fmt_get_config_value(const char *formatter, const char *key) {
+    GHashTable *key_to_vals = g_hash_table_lookup(RM_FMT_CONFIG, formatter);
 
     if(key_to_vals == NULL) {
         return NULL;
@@ -442,19 +455,23 @@ const char *rm_fmt_get_config_value(RmFmtTable *self, const char *formatter,
     return g_hash_table_lookup(key_to_vals, key);
 }
 
-bool rm_fmt_is_a_output(RmFmtTable *self, const char *path) {
-    return g_hash_table_contains(self->paths, path);
+bool rm_fmt_is_a_output(const char *path) {
+    return g_hash_table_contains(RM_FMT_PATHS, path);
 }
 
-bool rm_fmt_has_formatter(RmFmtTable *self, const char *name) {
-    return g_hash_table_contains(self->active_handler_names, name);
+bool rm_fmt_has_formatter(const char *name) {
+    return g_hash_table_contains(RM_FMT_ACTIVE_HANDLER_NAMES, name);
 }
 
-bool rm_fmt_is_stream(_UNUSED RmFmtTable *self, RmFmtHandler *handler) {
+bool rm_fmt_is_stream(_UNUSED RmFmtHandler *handler) {
     if(handler->path == NULL || strcmp(handler->path, "stdout") == 0 ||
        strcmp(handler->path, "stderr") == 0 || strcmp(handler->path, "stdin") == 0) {
         return true;
     }
 
     return access(handler->path, W_OK) == -1;
+}
+
+void rm_fmt_foreach(GFunc func, gpointer user_data) {
+    g_queue_foreach(&RM_FMT_HANDLERS, func, user_data);
 }

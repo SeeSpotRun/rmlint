@@ -35,15 +35,44 @@
 typedef struct RmFmtHandlerSummary {
     /* must be first */
     RmFmtHandler parent;
+    gboolean first_print_flag;
+    RmSession *session;  // temporary hack; TODO: better way
 } RmFmtHandlerSummary;
 
 #define ARROW \
     fprintf(out, "%s==>%s ", MAYBE_YELLOW(out, session), MAYBE_RESET(out, session));
 
+static void list_handlers(RmFmtHandler *handler, RmFmtHandlerSummary *self) {
+    static const gchar *const forbidden[] = {"stdout", "stderr", "stdin", NULL};
+
+    if(rm_util_strv_contains((const gchar *const *)&forbidden, handler->path)) {
+        return;
+    }
+
+    /* Check if the file really exists, so we can print it for sure */
+    if(access(handler->path, R_OK) == -1) {
+        return;
+    }
+
+    FILE *out = self->parent.file;
+
+    if(self->first_print_flag) {
+        fprintf(out, "\n");
+        self->first_print_flag = false;
+    }
+
+    fprintf(out, _("Wrote a %s%s%s file to: %s%s%s\n"), MAYBE_BLUE(out, self->session),
+            handler->name, MAYBE_RESET(out, self->session),
+            MAYBE_GREEN(out, self->session), handler->path,
+            MAYBE_RESET(out, self->session));
+}
+
 static void rm_fmt_prog(RmSession *session,
-                        _UNUSED RmFmtHandler *parent,
-                        _UNUSED FILE *out,
+                        RmFmtHandler *parent,
+                        FILE *out,
                         RmFmtProgressState state) {
+    RmFmtHandlerSummary *self = (RmFmtHandlerSummary *)parent;
+
     if(state != RM_PROGRESS_STATE_SUMMARY) {
         return;
     }
@@ -69,8 +98,7 @@ static void rm_fmt_prog(RmSession *session,
         ARROW fprintf(out, _("Early shutdown, probably not all lint was found.\n"));
     }
 
-    if(rm_fmt_has_formatter(session->cfg->formats, "pretty") &&
-       rm_fmt_has_formatter(session->cfg->formats, "sh")) {
+    if(rm_fmt_has_formatter("pretty") && rm_fmt_has_formatter("sh")) {
         ARROW fprintf(out, _("Note: Please use the saved script below for removal, not "
                              "the above output."));
         fprintf(out, "\n");
@@ -110,40 +138,9 @@ static void rm_fmt_prog(RmSession *session,
                   MAYBE_RED(out, session), elapsed_time, MAYBE_RESET(out, session));
     g_free(elapsed_time);
 
-    bool first_print_flag = true;
-
-    for(GList *iter = session->cfg->formats->handlers.head; iter; iter = iter->next) {
-        RmFmtHandler *handler = iter->data;
-
-        static const char *forbidden[] = {"stdout", "stderr", "stdin"};
-        gsize forbidden_len = sizeof(forbidden) / sizeof(forbidden[0]);
-
-        bool forbidden_found = false;
-        for(gsize i = 0; i < forbidden_len; i++) {
-            if(g_strcmp0(forbidden[i], handler->path) == 0) {
-                forbidden_found = true;
-                break;
-            }
-        }
-
-        if(forbidden_found) {
-            continue;
-        }
-
-        /* Check if the file really exists, so we can print it for sure */
-        if(access(handler->path, R_OK) == -1) {
-            continue;
-        }
-
-        if(first_print_flag) {
-            fprintf(out, "\n");
-            first_print_flag = false;
-        }
-
-        fprintf(out, _("Wrote a %s%s%s file to: %s%s%s\n"), MAYBE_BLUE(out, session),
-                handler->name, MAYBE_RESET(out, session), MAYBE_GREEN(out, session),
-                handler->path, MAYBE_RESET(out, session));
-    }
+    self->first_print_flag = true;
+    self->session = session;
+    rm_fmt_foreach((GFunc)list_handlers, self);
 }
 
 static RmFmtHandlerSummary SUMMARY_HANDLER_IMPL = {
@@ -158,6 +155,7 @@ static RmFmtHandlerSummary SUMMARY_HANDLER_IMPL = {
             .foot = NULL,
             .valid_keys = {NULL},
         },
+    .first_print_flag = true,
 };
 
 RmFmtHandler *SUMMARY_HANDLER = (RmFmtHandler *)&SUMMARY_HANDLER_IMPL;

@@ -36,7 +36,7 @@ typedef struct RmFmtHandlerHash {
 } RmFmtHandlerProgress;
 
 static void rm_fmt_head(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *out) {
-    if(rm_fmt_get_config_value(session->cfg->formats, "hash", "header")) {
+    if(rm_fmt_get_config_value("hash", "header")) {
         fprintf(out, "%s    %s\n", rm_digest_type_to_string(session->cfg->checksum_type),
                 "path");
     }

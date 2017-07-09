@@ -93,8 +93,7 @@ void rm_session_init(RmSession *session, RmCfg *cfg) {
     session->cfg = cfg;
     rm_cfg_init(cfg);
 
-    /* TODO: move this into rm_cfg_init(): */
-    cfg->formats = rm_fmt_open(session);
+    rm_fmt_open(session);
 
     session->tables = rm_file_tables_new(session);
 
@@ -264,9 +263,9 @@ int rm_session_replay_main(RmSession *session) {
     }
 
     rm_parrot_cage_close(&cage);
-    rm_fmt_flush(session->cfg->formats);
-    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PRE_SHUTDOWN);
-    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_SUMMARY);
+    rm_fmt_flush();
+    rm_fmt_set_state(RM_PROGRESS_STATE_PRE_SHUTDOWN);
+    rm_fmt_set_state(RM_PROGRESS_STATE_SUMMARY);
 
     return EXIT_SUCCESS;
 }
@@ -405,8 +404,8 @@ int rm_session_main(RmSession *session) {
     int exit_state = EXIT_SUCCESS;
 
     RmCfg *cfg = session->cfg;
-    rm_fmt_set_state(cfg->formats, RM_PROGRESS_STATE_INIT);
-    rm_fmt_set_state(cfg->formats, RM_PROGRESS_STATE_TRAVERSE);
+    rm_fmt_set_state(RM_PROGRESS_STATE_INIT);
+    rm_fmt_set_state(RM_PROGRESS_STATE_TRAVERSE);
 
     if(cfg->list_mounts) {
         session->mounts = rm_mounts_table_new(cfg->fake_fiemap);
@@ -433,9 +432,9 @@ int rm_session_main(RmSession *session) {
          * Emit a warning if the raw -D is used in conjunction with that.
          * */
         const char *handler_key =
-            rm_fmt_get_config_value(session->cfg->formats, "sh", "handler");
+            rm_fmt_get_config_value("sh", "handler");
         const char *clone_key =
-            rm_fmt_get_config_value(session->cfg->formats, "sh", "clone");
+            rm_fmt_get_config_value("sh", "clone");
         if(cfg->honour_dir_layout == false &&
            ((handler_key != NULL && strstr(handler_key, "clone") != NULL) ||
             clone_key != NULL)) {
@@ -456,7 +455,7 @@ int rm_session_main(RmSession *session) {
     }
 
     if(rm_counter_get(RM_COUNTER_TOTAL_FILES) >= 1) {
-        rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PREPROCESS);
+        rm_fmt_set_state(RM_PROGRESS_STATE_PREPROCESS);
         rm_preprocess(session);
 
         if(cfg->find_duplicates || cfg->merge_directories) {
@@ -471,13 +470,13 @@ int rm_session_main(RmSession *session) {
     }
 
     if(cfg->merge_directories) {
-        rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_MERGE);
+        rm_fmt_set_state(RM_PROGRESS_STATE_MERGE);
         rm_tm_finish(session->dir_merger);
     }
 
-    rm_fmt_flush(session->cfg->formats);
-    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_PRE_SHUTDOWN);
-    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_SUMMARY);
+    rm_fmt_flush();
+    rm_fmt_set_state(RM_PROGRESS_STATE_PRE_SHUTDOWN);
+    rm_fmt_set_state(RM_PROGRESS_STATE_SUMMARY);
 
     if(rm_counter_get(RM_COUNTER_SHRED_BYTES_REMAINING) != 0) {
         rm_log_error_line("BUG: Number of remaining bytes is %" RM_COUNTER_FORMAT

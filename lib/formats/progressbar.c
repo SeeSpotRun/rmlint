@@ -153,7 +153,8 @@ static void rm_fmt_progress_format_text(RmSession *session,
             1.0 - ((gdouble)rm_counter_get(RM_COUNTER_SHRED_BYTES_REMAINING) /
                    (gdouble)rm_counter_get(RM_COUNTER_SHRED_BYTES_AFTER_PREPROCESS));
 
-        gdouble eta_sec = rm_fmt_progress_calculated_eta(self, elapsed_sec, self->last_state);
+        gdouble eta_sec =
+            rm_fmt_progress_calculated_eta(self, elapsed_sec, self->last_state);
         char *eta_info = NULL;
         if(eta_sec >= 0) {
             eta_info = rm_format_elapsed_time(eta_sec, 0);
@@ -365,19 +366,19 @@ static void rm_fmt_prog(RmSession *session,
     if(state == RM_PROGRESS_STATE_INIT) {
         /* Do initializiation here */
         const char *update_interval_str =
-            rm_fmt_get_config_value(cfg->formats, "progressbar", "update_interval");
+            rm_fmt_get_config_value("progressbar", "update_interval");
 
         rm_running_mean_init(&self->read_diff_mean, 10);
         rm_running_mean_init(&self->eta_mean, 50);
         self->last_shred_bytes_remaining = 0;
 
         self->plain = true;
-        if(rm_fmt_get_config_value(cfg->formats, "progressbar", "fancy") != NULL) {
+        if(rm_fmt_get_config_value("progressbar", "fancy") != NULL) {
             self->plain = false;
         }
 
         self->use_unicode_glyphs = true;
-        if(rm_fmt_get_config_value(cfg->formats, "progressbar", "ascii") != NULL) {
+        if(rm_fmt_get_config_value("progressbar", "ascii") != NULL) {
             self->use_unicode_glyphs = false;
         }
 

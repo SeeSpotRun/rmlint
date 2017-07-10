@@ -342,10 +342,10 @@ static void rm_fmt_progress_print_bar(RmSession *session, RmFmtHandlerProgress *
 
 static void rm_fmt_prog(RmSession *session,
                         RmFmtHandler *parent,
-                        FILE *out,
                         RmFmtProgressState state) {
     RmFmtHandlerProgress *self = (RmFmtHandlerProgress *)parent;
     RmCfg *cfg = session->cfg;
+    FILE *out = parent->out;
 
     bool force_draw = false;
 
@@ -453,27 +453,22 @@ static void rm_fmt_prog(RmSession *session,
     }
 }
 
-static RmFmtHandlerProgress PROGRESS_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent =
-        {
-            .size = sizeof(PROGRESS_HANDLER_IMPL),
-            .name = "progressbar",
-            .head = NULL,
-            .elem = NULL,
-            .prog = rm_fmt_prog,
-            .foot = NULL,
-            .valid_keys = {"update_interval", "ascii", "fancy", NULL},
-        },
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-    /* Initialize own stuff */
-    .percent = 0.0f,
-    .text_len = 0,
-    .text_buf = {0},
-    .timer = NULL,
-    .use_unicode_glyphs = true,
-    .plain = true,
-    .stripe_offset = 0,
-    .last_state = RM_PROGRESS_STATE_INIT};
+const char *PROGRESS_HANDLER_NAME = "progressbar";
 
-RmFmtHandler *PROGRESS_HANDLER = (RmFmtHandler *)&PROGRESS_HANDLER_IMPL;
+const char *PROGRESS_HANDLER_VALID_KEYS[] = {"update_interval", "ascii", "fancy", NULL};
+
+RmFmtHandler *PROGRESS_HANDLER_NEW(void) {
+    RmFmtHandlerProgress *handler = g_new0(RmFmtHandlerProgress, 1);
+    handler->parent.prog = rm_fmt_prog;
+
+    /* Initialize own stuff (non-nulls only)*/
+    handler->percent = 0.0f;
+    handler->timer = g_timer_new();
+    handler->use_unicode_glyphs = true;
+    handler->plain = true;
+    handler->last_state = RM_PROGRESS_STATE_INIT;
+
+    return (RmFmtHandler *)handler;
+}

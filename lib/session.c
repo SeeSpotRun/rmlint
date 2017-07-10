@@ -431,10 +431,8 @@ int rm_session_main(RmSession *session) {
          * on two dupicate directories which is likely not a valid assumption.
          * Emit a warning if the raw -D is used in conjunction with that.
          * */
-        const char *handler_key =
-            rm_fmt_get_config_value("sh", "handler");
-        const char *clone_key =
-            rm_fmt_get_config_value("sh", "clone");
+        const char *handler_key = rm_fmt_get_config_value("sh", "handler");
+        const char *clone_key = rm_fmt_get_config_value("sh", "clone");
         if(cfg->honour_dir_layout == false &&
            ((handler_key != NULL && strstr(handler_key, "clone") != NULL) ||
             clone_key != NULL)) {

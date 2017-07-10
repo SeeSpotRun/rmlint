@@ -173,7 +173,8 @@ static void rm_fmt_json_sep(RmFmtHandlerJSON *self, FILE *out) {
 //  ACTUAL CALLBACKS   //
 /////////////////////////
 
-static void rm_fmt_head(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *out) {
+static void rm_fmt_head(RmSession *session, _UNUSED RmFmtHandler *parent) {
+    FILE *out = parent->out;
     fprintf(out, "[\n");
 
     RmFmtHandlerJSON *self = (RmFmtHandlerJSON *)parent;
@@ -211,8 +212,9 @@ static void rm_fmt_head(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *
     }
 }
 
-static void rm_fmt_foot(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *out) {
+static void rm_fmt_foot(_UNUSED RmSession *session, RmFmtHandler *parent) {
     RmFmtHandlerJSON *self = (RmFmtHandlerJSON *)parent;
+    FILE *out = parent->out;
 
     if(rm_fmt_get_config_value("json", "no_footer")) {
         fprintf(out, "{}");
@@ -258,8 +260,7 @@ static void rm_fmt_json_cksum(RmFile *file, char *checksum_str, size_t size) {
     rm_digest_hexstring(file->digest, checksum_str);
 }
 
-static void rm_fmt_elem(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *out,
-                        RmFile *file) {
+static void rm_fmt_elem(RmSession *session, _UNUSED RmFmtHandler *parent, RmFile *file) {
     if(rm_fmt_get_config_value("json", "no_body")) {
         return;
     }
@@ -272,6 +273,7 @@ static void rm_fmt_elem(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *
     char checksum_str[rm_digest_get_bytes(file->digest) * 2 + 1];
     rm_fmt_json_cksum(file, checksum_str, sizeof(checksum_str));
 
+    FILE *out = parent->out;
     RmFmtHandlerJSON *self = (RmFmtHandlerJSON *)parent;
 
     /* Make it look like a json element */
@@ -344,18 +346,21 @@ static void rm_fmt_elem(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *
     rm_fmt_json_close(self, out);
 }
 
-static RmFmtHandlerJSON JSON_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent =
-        {
-            .size = sizeof(JSON_HANDLER_IMPL),
-            .name = "json",
-            .head = rm_fmt_head,
-            .elem = rm_fmt_elem,
-            .prog = NULL,
-            .foot = rm_fmt_foot,
-            .valid_keys = {"no_header", "no_footer", "no_body", "oneline", NULL},
-        },
-    .pretty = true};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *JSON_HANDLER = (RmFmtHandler *)&JSON_HANDLER_IMPL;
+const char *JSON_HANDLER_NAME = "json";
+
+const char *JSON_HANDLER_VALID_KEYS[] = {"no_header", "no_footer", "no_body", "oneline",
+                                         NULL};
+
+RmFmtHandler *JSON_HANDLER_NEW(void) {
+    RmFmtHandlerJSON *handler = g_new0(RmFmtHandlerJSON, 1);
+    /* Initialize parent */
+    handler->parent.head = rm_fmt_head;
+    handler->parent.elem = rm_fmt_elem;
+    handler->parent.foot = rm_fmt_foot;
+
+    /* initialise any non-null handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+};

@@ -40,18 +40,17 @@ typedef struct RmFmtHandlerCSV {
     RmFmtHandler parent;
 } RmFmtHandlerCSV;
 
-static void rm_fmt_head(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent,
-                        FILE *out) {
+static void rm_fmt_head(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent) {
     if(rm_fmt_get_config_value("csv", "no_header")) {
         return;
     }
 
-    fprintf(out, "%s%s%s%s%s%s%s\n", "type", CSV_SEP, "path", CSV_SEP, "size", CSV_SEP,
-            "checksum");
+    fprintf(parent->out, "%s%s%s%s%s%s%s\n", "type", CSV_SEP, "path", CSV_SEP, "size",
+            CSV_SEP, "checksum");
 }
 
 static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent,
-                        FILE *out, RmFile *file) {
+                        RmFile *file) {
     if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE &&
        (!file->digest || !session->cfg->write_unfinished)) {
         /* unique file with no partial checksum */
@@ -70,22 +69,26 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
     RM_DEFINE_PATH(file);
     char *clean_path = rm_util_strsub(file_path, CSV_QUOTE, CSV_QUOTE "" CSV_QUOTE);
 
-    fprintf(out, CSV_FORMAT, rm_file_lint_type_to_string(file->lint_type), clean_path,
-            file->actual_file_size, checksum_str);
+    fprintf(parent->out, CSV_FORMAT, rm_file_lint_type_to_string(file->lint_type),
+            clean_path, file->actual_file_size, checksum_str);
 
     g_free(clean_path);
 }
 
-static RmFmtHandlerCSV CSV_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent = {
-        .size = sizeof(CSV_HANDLER_IMPL),
-        .name = "csv",
-        .head = rm_fmt_head,
-        .elem = rm_fmt_elem,
-        .prog = NULL,
-        .foot = NULL,
-        .valid_keys = {"no_header", NULL},
-    }};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *CSV_HANDLER = (RmFmtHandler *)&CSV_HANDLER_IMPL;
+const char *CSV_HANDLER_NAME = "csv";
+
+const char *CSV_HANDLER_VALID_KEYS[] = {"no_header", NULL};
+
+RmFmtHandler *CSV_HANDLER_NEW(void) {
+    RmFmtHandlerCSV *handler = g_new0(RmFmtHandlerCSV, 1);
+
+    /* Initialize parent */
+    handler->parent.head = rm_fmt_head;
+    handler->parent.elem = rm_fmt_elem;
+
+    /* initialise any non-null handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+}

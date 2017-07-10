@@ -37,7 +37,6 @@ typedef struct RmFmtHandlerTimestamp {
 
 static void rm_fmt_prog(_UNUSED RmSession *session,
                         _UNUSED RmFmtHandler *parent,
-                        _UNUSED FILE *out,
                         RmFmtProgressState state) {
     if(state != RM_PROGRESS_STATE_INIT) {
         return;
@@ -47,25 +46,25 @@ static void rm_fmt_prog(_UNUSED RmSession *session,
         char time_buf[256];
         memset(time_buf, 0, sizeof(time_buf));
         rm_iso8601_format(time(NULL), time_buf, sizeof(time_buf));
-        fprintf(out, "%s", time_buf);
+        fprintf(parent->out, "%s", time_buf);
     } else {
         /* Just write out current time */
-        fprintf(out, "%" LLU "", (guint64)time(NULL));
+        fprintf(parent->out, "%" LLU "", (guint64)time(NULL));
     }
 }
 
-static RmFmtHandlerTimestamp TIMESTAMP_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent =
-        {
-            .size = sizeof(TIMESTAMP_HANDLER_IMPL),
-            .name = "stamp",
-            .head = NULL,
-            .elem = NULL,
-            .prog = rm_fmt_prog,
-            .foot = NULL,
-            .valid_keys = {"iso8601", NULL},
-        },
-};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *TIMESTAMP_HANDLER = (RmFmtHandler *)&TIMESTAMP_HANDLER_IMPL;
+const char *TIMESTAMP_HANDLER_NAME = "stamp";
+
+const char *TIMESTAMP_HANDLER_VALID_KEYS[] = {"iso8601", NULL};
+
+RmFmtHandler *TIMESTAMP_HANDLER_NEW(void) {
+    RmFmtHandlerTimestamp *handler = g_new0(RmFmtHandlerTimestamp, 1);
+    /* Initialize parent */
+    handler->parent.prog = rm_fmt_prog;
+
+    /* initialise any non-null handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+};

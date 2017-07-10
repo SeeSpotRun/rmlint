@@ -35,7 +35,7 @@ typedef struct RmFmtHandlerUniques {
 } RmFmtHandlerUniques;
 
 static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent,
-                        _UNUSED FILE *out, RmFile *file) {
+                        RmFile *file) {
     if(file->lint_type != RM_LINT_TYPE_UNIQUE_FILE) {
         /* we only not want to list unfinished files. */
         return;
@@ -50,20 +50,22 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
     }
 
     RM_DEFINE_PATH(file);
-    fputs(file_path, out);
-    fputc('\n', out);
+    fputs(file_path, parent->out);
+    fputc('\n', parent->out);
 }
 
-static RmFmtHandlerUniques UNIQUES_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent = {
-        .size = sizeof(UNIQUES_HANDLER_IMPL),
-        .name = "uniques",
-        .head = NULL,
-        .elem = rm_fmt_elem,
-        .prog = NULL,
-        .foot = NULL,
-        .valid_keys = {NULL},
-    }};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *UNIQUES_HANDLER = (RmFmtHandler *)&UNIQUES_HANDLER_IMPL;
+const char *UNIQUES_HANDLER_NAME = "uniques";
+
+const char *UNIQUES_HANDLER_VALID_KEYS[] = {NULL};
+
+RmFmtHandler *UNIQUES_HANDLER_NEW(void) {
+    RmFmtHandlerUniques *handler = g_new0(RmFmtHandlerUniques, 1);
+    /* Initialize parent */
+    handler->parent.elem = rm_fmt_elem;
+
+    /* initialise any non-null handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+};

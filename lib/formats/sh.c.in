@@ -30,7 +30,6 @@
 #include <stdio.h>
 #include <string.h>
 
-
 typedef struct RmFmtHandlerShScript {
     RmFmtHandler parent;
     RmFile *last_original;
@@ -280,7 +279,7 @@ static char *rm_fmt_sh_get_extra_equal_args(RmSession *session) {
     return g_string_free(buf, false);
 }
 
-static void rm_fmt_head(RmSession *session, RmFmtHandler *parent, FILE *out) {
+static void rm_fmt_head(RmSession *session, RmFmtHandler *parent) {
     RmFmtHandlerShScript *self = (RmFmtHandlerShScript *)parent;
 
     self->line_count = 0;
@@ -309,7 +308,7 @@ static void rm_fmt_head(RmSession *session, RmFmtHandler *parent, FILE *out) {
     }
 
     if(parent->file_existed_already == false) {
-        if(fchmod(fileno(out), S_IRUSR | S_IWUSR | S_IXUSR) == -1) {
+        if(fchmod(fileno(parent->out), S_IRUSR | S_IWUSR | S_IXUSR) == -1) {
             rm_log_perror("Could not chmod +x sh script");
         }
     }
@@ -318,7 +317,7 @@ static void rm_fmt_head(RmSession *session, RmFmtHandler *parent, FILE *out) {
 
     /* Fill in all placeholders in the script template */
     fprintf(
-        out, SH_SCRIPT_TEMPLATE_HEAD,
+        parent->out, SH_SCRIPT_TEMPLATE_HEAD,
         session->cfg->iwd,
         (session->cfg->joined_argv) ? (session->cfg->joined_argv) : "[unknown]",
         (session->cfg->full_argv0_path) ? (session->cfg->full_argv0_path) : "$(which rmlint)",
@@ -358,7 +357,6 @@ static void rm_fmt_write_duplicate(RmFmtHandlerShScript *self, FILE *out, RmFile
         prefix = g_strdup_printf("original_cmd '%s'", file_escaped);
         self->last_original = file;
     } else if(self->last_original) {
-
         RmFile *last_original = self->last_original;
         RM_DEFINE_PATH(last_original);
 
@@ -395,7 +393,7 @@ static void rm_fmt_write_duplicate(RmFmtHandlerShScript *self, FILE *out, RmFile
 }
 
 static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent,
-                        FILE *out, RmFile *file) {
+                        RmFile *file) {
     RmFmtHandlerShScript *self = (RmFmtHandlerShScript *)parent;
     if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
         return;
@@ -406,29 +404,31 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
 
     switch(file->lint_type) {
     case RM_LINT_TYPE_EMPTY_DIR:
-        fprintf(out, "handle_emptydir '%s' # empty folder\n", path);
+        fprintf(parent->out, "handle_emptydir '%s' # empty folder\n", path);
         break;
     case RM_LINT_TYPE_EMPTY_FILE:
-        fprintf(out, "handle_emptyfile '%s' # empty file\n", path);
+        fprintf(parent->out, "handle_emptyfile '%s' # empty file\n", path);
         break;
     case RM_LINT_TYPE_BADLINK:
-        fprintf(out, "handle_bad_symlink '%s' # bad symlink pointing nowhere\n", path);
+        fprintf(parent->out, "handle_bad_symlink '%s' # bad symlink pointing nowhere\n",
+                path);
         break;
     case RM_LINT_TYPE_NONSTRIPPED:
-        fprintf(out, "handle_unstripped_binary '%s' # binary with debugsymbols\n", path);
+        fprintf(parent->out, "handle_unstripped_binary '%s' # binary with debugsymbols\n",
+                path);
         break;
     case RM_LINT_TYPE_BADUID:
-        fprintf(out, "handle_bad_user_id '%s' # bad uid\n", path);
+        fprintf(parent->out, "handle_bad_user_id '%s' # bad uid\n", path);
         break;
     case RM_LINT_TYPE_BADGID:
-        fprintf(out, "handle_bad_group_id '%s' # bad gid\n", path);
+        fprintf(parent->out, "handle_bad_group_id '%s' # bad gid\n", path);
         break;
     case RM_LINT_TYPE_BADUGID:
-        fprintf(out, "handle_bad_user_and_group_id '%s' # bad gid\n", path);
+        fprintf(parent->out, "handle_bad_user_and_group_id '%s' # bad gid\n", path);
         break;
     case RM_LINT_TYPE_DUPE_DIR_CANDIDATE:
     case RM_LINT_TYPE_DUPE_CANDIDATE:
-        rm_fmt_write_duplicate(self, out, file);
+        rm_fmt_write_duplicate(self, parent->out, file);
         break;
     default:
         rm_log_warning("Warning: unknown type in encountered: %d\n", file->lint_type);
@@ -439,7 +439,7 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
     g_free(path);
 }
 
-static void rm_fmt_foot(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *out) {
+static void rm_fmt_foot(_UNUSED RmSession *session, RmFmtHandler *parent) {
     RmFmtHandlerShScript *self = (RmFmtHandlerShScript *)parent;
     g_byte_array_free(self->order, true);
 
@@ -449,7 +449,7 @@ static void rm_fmt_foot(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *
     }
 
     char *escaped_path = rm_fmt_sh_escape_path(parent->path);
-    fprintf(out, SH_SCRIPT_TEMPLATE_FOOT, "rm -f", escaped_path);
+    fprintf(parent->out, SH_SCRIPT_TEMPLATE_FOOT, "rm -f", escaped_path);
 
     const char progress_marker_text[] = "PROGRESS_TOTAL=";
     char *progress_marker = strstr(SH_SCRIPT_TEMPLATE_HEAD, progress_marker_text);
@@ -458,8 +458,8 @@ static void rm_fmt_foot(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *
                        sizeof(progress_marker_text) - 1;
 
         /* Go to the exact write position */
-        if(fseek(out, offset, SEEK_SET) != -1) {
-            if(fprintf(out, "%" LLU, self->line_count) < 0) {
+        if(fseek(parent->out, offset, SEEK_SET) != -1) {
+            if(fprintf(parent->out, "%" LLU, self->line_count) < 0) {
                 rm_log_perror(
                     "writing total progress failed; there will be no proress bar");
             }
@@ -471,18 +471,21 @@ static void rm_fmt_foot(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *
     g_free(escaped_path);
 }
 
-static RmFmtHandlerShScript SH_SCRIPT_HANDLER_IMPL = {
-    .parent = {
-        .size = sizeof(SH_SCRIPT_HANDLER_IMPL),
-        .name = "sh",
-        .head = rm_fmt_head,
-        .elem = rm_fmt_elem,
-        .prog = NULL,
-        .foot = rm_fmt_foot,
-        .valid_keys = {"handler", "cmd", "clone", "link", "hardlink", "symlink", NULL},
-    },
-    .last_original = NULL,
-    .line_count = 0
-};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *SH_SCRIPT_HANDLER = (RmFmtHandler *)&SH_SCRIPT_HANDLER_IMPL;
+const char *SH_SCRIPT_HANDLER_NAME = "sh";
+
+const char *SH_SCRIPT_HANDLER_VALID_KEYS[] = {"handler",  "cmd",     "clone", "link",
+                                              "hardlink", "symlink", NULL};
+
+RmFmtHandler *SH_SCRIPT_HANDLER_NEW(void) {
+    RmFmtHandlerShScript *handler = g_new0(RmFmtHandlerShScript, 1);
+    /* Initialize parent */
+    handler->parent.head = rm_fmt_head;
+    handler->parent.elem = rm_fmt_elem;
+    handler->parent.foot = rm_fmt_foot;
+
+    /* initialise any (non-null) handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+};

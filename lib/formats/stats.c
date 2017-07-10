@@ -42,8 +42,8 @@ typedef struct RmFmtHandlerStats {
 
 static void rm_fmt_prog(RmSession *session,
                         _UNUSED RmFmtHandler *parent,
-                        _UNUSED FILE *out,
                         RmFmtProgressState state) {
+    FILE *out = parent->out;
     if(state != RM_PROGRESS_STATE_SUMMARY) {
         return;
     }
@@ -134,18 +134,18 @@ static void rm_fmt_prog(RmSession *session,
             MAYBE_RED(out, session), eff_dupes, MAYBE_RESET(out, session));
 }
 
-static RmFmtHandlerStats STATS_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent =
-        {
-            .size = sizeof(STATS_HANDLER_IMPL),
-            .name = "stats",
-            .head = NULL,
-            .elem = NULL,
-            .prog = rm_fmt_prog,
-            .foot = NULL,
-            .valid_keys = {NULL},
-        },
-};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *STATS_HANDLER = (RmFmtHandler *)&STATS_HANDLER_IMPL;
+const char *STATS_HANDLER_NAME = "stats";
+
+const char *STATS_HANDLER_VALID_KEYS[] = {NULL};
+
+RmFmtHandler *STATS_HANDLER_NEW(void) {
+    RmFmtHandlerStats *handler = g_new0(RmFmtHandlerStats, 1);
+    /* Initialize parent */
+    handler->parent.prog = rm_fmt_prog;
+
+    /* initialise any non-null handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+};

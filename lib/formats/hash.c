@@ -35,15 +35,15 @@ typedef struct RmFmtHandlerHash {
     RmFmtHandler parent;
 } RmFmtHandlerHash;
 
-static void rm_fmt_head(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *out) {
+static void rm_fmt_head(RmSession *session, RmFmtHandler *parent) {
     if(rm_fmt_get_config_value("hash", "header")) {
-        fprintf(out, "%s    %s\n", rm_digest_type_to_string(session->cfg->checksum_type),
-                "path");
+        fprintf(parent->out, "%s    %s\n",
+                rm_digest_type_to_string(session->cfg->checksum_type), "path");
     }
 }
 
 static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent,
-                        FILE *out, RmFile *file) {
+                        RmFile *file) {
     if(!file->digest) {
         /* unique file with no partial checksum */
         return;
@@ -57,19 +57,22 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
 
     RM_DEFINE_PATH(file);
 
-    fprintf(out, "%s %s\n", checksum_str, file_path);
+    fprintf(parent->out, "%s %s\n", checksum_str, file_path);
 }
 
-static RmFmtHandlerHash HASH_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent = {
-        .size = sizeof(HASH_HANDLER_IMPL),
-        .name = "hash",
-        .head = rm_fmt_head,
-        .elem = rm_fmt_elem,
-        .prog = NULL,
-        .foot = NULL,
-        .valid_keys = {"header", NULL},
-    }};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *HASH_HANDLER = (RmFmtHandler *)&HASH_HANDLER_IMPL;
+const char *HASH_HANDLER_NAME = "hash";
+
+const char *HASH_HANDLER_VALID_KEYS[] = {"header", NULL};
+
+RmFmtHandler *HASH_HANDLER_NEW(void) {
+    RmFmtHandlerHash *handler = g_new0(RmFmtHandlerHash, 1);
+    /* Initialize parent */
+    handler->parent.head = rm_fmt_head;
+    handler->parent.elem = rm_fmt_elem;
+
+    /* initialise any non-null handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+};

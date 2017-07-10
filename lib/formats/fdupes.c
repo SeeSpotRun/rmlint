@@ -40,8 +40,7 @@ typedef struct RmFmtHandlerFdupes {
     bool use_same_line;
 } RmFmtHandlerFdupes;
 
-static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent,
-                        _UNUSED FILE *out, RmFile *file) {
+static void rm_fmt_elem(_UNUSED RmSession *session, RmFmtHandler *parent, RmFile *file) {
     RmFmtHandlerFdupes *self = (RmFmtHandlerFdupes *)parent;
 
     if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
@@ -53,6 +52,7 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
     memset(line, 0, sizeof(line));
 
     RM_DEFINE_PATH(file);
+    FILE *out = parent->out;
 
     switch(file->lint_type) {
     case RM_LINT_TYPE_DUPE_DIR_CANDIDATE:
@@ -77,7 +77,6 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
 
 static void rm_fmt_prog(RmSession *session,
                         _UNUSED RmFmtHandler *parent,
-                        FILE *out,
                         RmFmtProgressState state) {
     RmFmtHandlerFdupes *self = (RmFmtHandlerFdupes *)parent;
 
@@ -88,25 +87,23 @@ static void rm_fmt_prog(RmSession *session,
     }
 
     if(state == RM_PROGRESS_STATE_PRE_SHUTDOWN) {
-        fprintf(out, "\n");
+        fprintf(parent->out, "\n");
     }
 }
 
-static RmFmtHandlerFdupes FDUPES_HANDLER_IMPL = {
+/* API hooks for RM_FMT_REGISTER in formats.c */
+
+const char *FDUPES_HANDLER_NAME = "fdupes";
+
+const char *FDUPES_HANDLER_VALID_KEYS[] = {"omitfirst", "sameline", NULL};
+
+RmFmtHandler *FDUPES_HANDLER_NEW(void) {
+    RmFmtHandlerFdupes *handler = g_new0(RmFmtHandlerFdupes, 1);
     /* Initialize parent */
-    .parent =
-        {
-            .size = sizeof(FDUPES_HANDLER_IMPL),
-            .name = "fdupes",
-            .head = NULL,
-            .elem = rm_fmt_elem,
-            .prog = rm_fmt_prog,
-            .foot = NULL,
-            .valid_keys = {"omitfirst", "sameline", NULL},
-        },
-    .use_same_line = false,
-    .omit_first_line = false
+    handler->parent.elem = rm_fmt_elem;
+    handler->parent.prog = rm_fmt_prog;
 
+    /* initialise any non-null handler-specific fields */
+
+    return (RmFmtHandler *)handler;
 };
-
-RmFmtHandler *FDUPES_HANDLER = (RmFmtHandler *)&FDUPES_HANDLER_IMPL;

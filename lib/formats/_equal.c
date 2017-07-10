@@ -55,7 +55,7 @@ static void rm_fmt_report_failure(RmFmtHandlerEqual *self, RmSession *session) {
     rm_session_abort();
 }
 
-static void rm_fmt_head(RmSession *session, RmFmtHandler *parent, _UNUSED FILE *out) {
+static void rm_fmt_head(RmSession *session, RmFmtHandler *parent) {
     GHashTable *input_paths = g_hash_table_new(g_str_hash, g_str_equal);
 
     GSList *paths = session->cfg->paths;
@@ -68,10 +68,7 @@ static void rm_fmt_head(RmSession *session, RmFmtHandler *parent, _UNUSED FILE *
     self->input_paths = input_paths;
 }
 
-static void rm_fmt_elem(RmSession *session,
-                        RmFmtHandler *self_ref,
-                        _UNUSED FILE *out,
-                        RmFile *file) {
+static void rm_fmt_elem(RmSession *session, RmFmtHandler *self_ref, RmFile *file) {
     RmFmtHandlerEqual *self = (RmFmtHandlerEqual *)self_ref;
 
     /*  No need to check anymore, it's not equal. */
@@ -116,27 +113,26 @@ static void rm_fmt_elem(RmSession *session,
     self->last_checksum = checksum;
 }
 
-static void rm_fmt_foot(_UNUSED RmSession *session,
-                        RmFmtHandler *parent,
-                        _UNUSED FILE *out) {
+static void rm_fmt_foot(_UNUSED RmSession *session, RmFmtHandler *parent) {
     RmFmtHandlerEqual *self = (RmFmtHandlerEqual *)parent;
     g_hash_table_unref(self->input_paths);
     g_free(self->last_checksum);
 }
 
-static RmFmtHandlerEqual EQUAL_HANDLE_IMPL = {
-    /* Initialize parent */
-    .parent = {
-        .size = sizeof(EQUAL_HANDLE_IMPL),
-        .name = "_equal",
-        .head = rm_fmt_head,
-        .elem = rm_fmt_elem,
-        .prog = NULL,
-        .foot = rm_fmt_foot,
-        .valid_keys = {NULL},
-    },
-    .last_checksum = NULL,
-    .mismatch_found = false
-};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *EQUAL_HANDLER = (RmFmtHandler *)&EQUAL_HANDLE_IMPL;
+const char *EQUAL_HANDLER_NAME = "_equal";
+
+const char *EQUAL_HANDLER_VALID_KEYS[] = {NULL};
+
+RmFmtHandler *EQUAL_HANDLER_NEW(void) {
+    RmFmtHandlerEqual *handler = g_new0(RmFmtHandlerEqual, 1);
+    /* Initialize parent */
+    handler->parent.head = rm_fmt_head;
+    handler->parent.elem = rm_fmt_elem;
+    handler->parent.foot = rm_fmt_foot;
+
+    /* initialise any non-null handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+};

@@ -54,7 +54,7 @@ static void list_handlers(RmFmtHandler *handler, RmFmtHandlerSummary *self) {
         return;
     }
 
-    FILE *out = self->parent.file;
+    FILE *out = self->parent.out;
 
     if(self->first_print_flag) {
         fprintf(out, "\n");
@@ -69,8 +69,8 @@ static void list_handlers(RmFmtHandler *handler, RmFmtHandlerSummary *self) {
 
 static void rm_fmt_prog(RmSession *session,
                         RmFmtHandler *parent,
-                        FILE *out,
                         RmFmtProgressState state) {
+    FILE *out = parent->out;
     RmFmtHandlerSummary *self = (RmFmtHandlerSummary *)parent;
 
     if(state != RM_PROGRESS_STATE_SUMMARY) {
@@ -143,19 +143,19 @@ static void rm_fmt_prog(RmSession *session,
     rm_fmt_foreach((GFunc)list_handlers, self);
 }
 
-static RmFmtHandlerSummary SUMMARY_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent =
-        {
-            .size = sizeof(SUMMARY_HANDLER_IMPL),
-            .name = "summary",
-            .head = NULL,
-            .elem = NULL,
-            .prog = rm_fmt_prog,
-            .foot = NULL,
-            .valid_keys = {NULL},
-        },
-    .first_print_flag = true,
-};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *SUMMARY_HANDLER = (RmFmtHandler *)&SUMMARY_HANDLER_IMPL;
+const char *SUMMARY_HANDLER_NAME = "summary";
+
+const char *SUMMARY_HANDLER_VALID_KEYS[] = {NULL};
+
+RmFmtHandler *SUMMARY_HANDLER_NEW(void) {
+    RmFmtHandlerSummary *handler = g_new0(RmFmtHandlerSummary, 1);
+    /* Initialize parent */
+    handler->parent.prog = rm_fmt_prog;
+
+    /* initialise any non-null handler-specific fields */
+    handler->first_print_flag = true;
+
+    return (RmFmtHandler *)handler;
+};

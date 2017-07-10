@@ -29,18 +29,17 @@
 /* You guessed it: it does nothing. */
 typedef struct RmFmtHandlerNull { RmFmtHandler parent; } RmFmtHandlerNull;
 
-static RmFmtHandlerNull NULL_HANDLER_IMPL = {
-    /* Initialize parent */
-    .parent =
-        {
-            .size = sizeof(NULL_HANDLER_IMPL),
-            .name = "null",
-            .head = NULL,
-            .elem = NULL,
-            .prog = NULL,
-            .foot = NULL,
-            .valid_keys = {NULL},
-        },
-};
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-RmFmtHandler *NULL_HANDLER = (RmFmtHandler *)&NULL_HANDLER_IMPL;
+const char *NULL_HANDLER_NAME = "null";
+
+const char *NULL_HANDLER_VALID_KEYS[] = {NULL};
+
+RmFmtHandler *NULL_HANDLER_NEW(void) {
+    RmFmtHandlerNull *handler = g_new0(RmFmtHandlerNull, 1);
+    /* Initialize parent */
+
+    /* initialise any handler-specific fields */
+
+    return (RmFmtHandler *)handler;
+};

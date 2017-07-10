@@ -38,10 +38,8 @@ typedef struct RmFmtHandlerPy {
     RmFmtHandler parent;
 
     /* HACK: Actual handler might be bigger, add padding. */
+    /* DJT: huh? */
     char _dummy[1024];
-
-    /* Filehandle to pass to the JSON Formatter. */
-    FILE *json_out;
 
 } RmFmtHandlerPy;
 
@@ -49,67 +47,32 @@ typedef struct RmFmtHandlerPy {
 //  ACTUAL CALLBACKS   //
 /////////////////////////
 
-static void rm_fmt_head(RmSession *session, RmFmtHandler *parent, FILE *out) {
-    RmFmtHandlerPy *self = (RmFmtHandlerPy *)parent;
-
-    if(fwrite(PY_SOURCE, 1, sizeof(PY_SOURCE), out) <= 0) {
+static void rm_fmt_head(_UNUSED RmSession *session, RmFmtHandler *parent) {
+    if(fwrite(PY_SOURCE, 1, sizeof(PY_SOURCE), parent->out) <= 0) {
         rm_log_perror("Failed to write python script");
         return;
     }
 
-    if(fchmod(fileno(out), S_IRUSR | S_IWUSR | S_IXUSR) == -1) {
+    if(fchmod(fileno(parent->out), S_IRUSR | S_IWUSR | S_IXUSR) == -1) {
         rm_log_perror("Could not chmod +x python-script");
     }
-
-    self->json_out = fopen(".rmlint.json", "w");
-    if(self->json_out == NULL) {
-        return;
-    }
-
-    /* Delegate */
-    extern RmFmtHandler *JSON_HANDLER;
-    JSON_HANDLER->head(session, (RmFmtHandler *)self, self->json_out);
 }
 
-static void rm_fmt_foot(RmSession *session, RmFmtHandler *parent, _UNUSED FILE *out) {
-    RmFmtHandlerPy *self = (RmFmtHandlerPy *)parent;
-    if(self->json_out == NULL) {
-        return;
-    }
+/* API hooks for RM_FMT_REGISTER in formats.c */
 
-    /* Delegate */
-    extern RmFmtHandler *JSON_HANDLER;
-    JSON_HANDLER->foot(session, (RmFmtHandler *)self, self->json_out);
+const char *PY_HANDLER_NAME = "py";
 
-    fclose(self->json_out);
-}
+const char *PY_HANDLER_VALID_KEYS[] = {"omitfirst", "sameline", NULL};
 
-static void rm_fmt_elem(
-    RmSession *session,
-    RmFmtHandler *parent,
-    _UNUSED FILE *out, RmFile *file
-) {
-    RmFmtHandlerPy *self = (RmFmtHandlerPy *)parent;
-    if(self->json_out == NULL) {
-        return;
-    }
-
-    /* Delegate */
-    extern RmFmtHandler *JSON_HANDLER;
-    JSON_HANDLER->elem(session, (RmFmtHandler *)self, self->json_out, file);
-}
-
-static RmFmtHandlerPy PY_HANDLER_IMPL = {
+RmFmtHandler *PY_HANDLER_NEW(void) {
+    RmFmtHandlerPy *handler = g_new0(RmFmtHandlerPy, 1);
     /* Initialize parent */
-    .parent = {
-        .size = sizeof(PY_HANDLER_IMPL),
-        .name = "py",
-        .head = rm_fmt_head,
-        .elem = rm_fmt_elem,
-        .prog = NULL,
-        .foot = rm_fmt_foot,
-        .valid_keys = {NULL},
-    }
-};
+    handler->parent.head = rm_fmt_head;
 
-RmFmtHandler *PY_HANDLER = (RmFmtHandler *)&PY_HANDLER_IMPL;
+    /* initialise any non-null handler-specific fields */
+
+    /* Py handler needs a corresponding JSON handler */
+    rm_fmt_add("json", ".rmlint.json");
+
+    return (RmFmtHandler *)handler;
+};

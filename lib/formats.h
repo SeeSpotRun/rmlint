@@ -53,29 +53,22 @@ typedef enum RmFmtProgressState {
 /* Callback definitions */
 struct RmFmtHandler;
 
-typedef void (*RmFmtHeadCallback)(RmSession *session, struct RmFmtHandler *self,
-                                  FILE *out);
-typedef void (*RmFmtFootCallback)(RmSession *session, struct RmFmtHandler *self,
-                                  FILE *out);
+typedef void (*RmFmtHeadCallback)(RmSession *session, struct RmFmtHandler *self);
+typedef void (*RmFmtFootCallback)(RmSession *session, struct RmFmtHandler *self);
 typedef void (*RmFmtElemCallback)(RmSession *session, struct RmFmtHandler *self,
-                                  FILE *out, RmFile *file);
+                                  RmFile *file);
 typedef void (*RmFmtProgCallback)(RmSession *session, struct RmFmtHandler *self,
-                                  FILE *out, RmFmtProgressState state);
+                                  RmFmtProgressState state);
 
 /* Parent "class" for output handlers */
 typedef struct RmFmtHandler {
     /* Name of the Handler */
-    const char *name;
+    char *name;
 
-    /* Size in bytes of the *real* handler */
-    const int size;
-
-    /* Path to which the Handler is pointed or
-     * NULL if it the original template.
-     */
+    /* Path to which the Handler is pointed */
     char *path;
 
-    /* False at beginnging, is set to true once
+    /* False at beginning, is set to true once
      * the head() callback was called, i.e. on the
      * first write(). Used for lazy init.
      */
@@ -97,13 +90,11 @@ typedef struct RmFmtHandler {
      */
     GMutex print_mtx;
 
-    /* A list of valid keys that may be passed to
-     * --config fmt:key.
-     */
-    const char *valid_keys[32];
-
-    FILE *file;
+    /* The output file */
+    FILE *out;
 } RmFmtHandler;
+
+typedef RmFmtHandler *(*RmFmtHandlerNew)(void);
 
 ////////////////////
 //   PUBLIC API   //
@@ -235,40 +226,58 @@ void rm_fmt_foreach(GFunc func, gpointer user_data);
 
 /**
  * You can use this template for implementing new RmFmtHandlers.
- * All callbacks are not required to be implemented, leave them to NULL if
- * you do not implement them:
+ * Remember to register the handler in rm_fmt_open().
+ * Note: all callbacks are not required to be implemented, delete them
+ * from FOO_HANDLER_NEW() if you do not implement them.
 
-typedef struct RmFmtHandlerProgress {
+typedef struct RmFmtHandlerFoo {
+    // must be first:
     RmFmtHandler parent;
 
-    guint8 percent;
-} RmFmtHandlerProgress;
+    // handler-specific fields
+    RmFmtProgressState last_state;
+} RmFmtHandlerFoo;
 
-static void rm_fmt_head(RmSession *session, RmFmtHandler *parent, FILE *out) {
+static void rm_fmt_head(RmSession *session, RmFmtHandler *parent) {
+    fprint(parent->file, "Header\n");
 }
 
-static void rm_fmt_elem(RmSession *session, RmFmtHandler *parent, FILE *out, RmFile *file)
-{
+static void rm_fmt_elem(RmSession *session, RmFmtHandler *parent, RmFile *file){
+    fprintf(parent->file, "File: %s\n", file->basename);
 }
 
-static void rm_fmt_prog(RmSession *session, RmFmtHandler *parent, FILE *out,
+static void rm_fmt_prog(RmSession *session, RmFmtHandler *parent,
 RmFmtProgressState state) {
+    RmFmtHandlerFoo *self = (RmFmtHandlerFoo*) parent;
+    if(state != self->last_state) {
+        char *state_name = rm_fmt_progress_to_string(state);
+        fprintf(parent->file, "Progress state: %s\n", state_name);
+        g_free(state_name);
+    }
 }
 
-static void rm_fmt_foot(RmSession *session, RmFmtHandler *parent, FILE *out) {
+static void rm_fmt_foot(RmSession *session, RmFmtHandler *parent) {
+    fprint(parent->file, "Footer\n");
 }
 
-static RmFmtHandlerProgress PROGRESS_HANDLER = {
-    .parent = {
-        .size = sizeof(PROGRESS_HANDLER),
-        .name = "progressbar",
-        .head = rm_fmt_head,
-        .elem = rm_fmt_elem,
-        .prog = rm_fmt_prog,
-        .foot = rm_fmt_foot
-    },
+// API hooks for RM_FMT_REGISTER in formats.c:
 
-    .percent = 0
+const char *FOO_HANDLER_NAME = "foo";
+
+const char *FOO_HANDLER_VALID_KEYS[] = {"bar", "baz", NULL};
+
+RmFmtHandler *FOO_HANDLER_NEW(void) {
+    RmFmtHandlerFoo *handler = g_new0(RmFmtHandlerFoo, 1);
+    // Initialize parent
+    handler->parent.head = rm_fmt_head;
+    handler->parent.elem = rm_fmt_elem;
+    handler->parent.prog = rm_fmt_prog;
+    handler->parent.foot = rm_fmt_foot;
+
+    // initialise any non-null handler-specific fields
+    handler->last_state = RM_PROGRESS_STATE_INIT;
+
+    return (RmFmtHandler *) handler;
 };
 
 */

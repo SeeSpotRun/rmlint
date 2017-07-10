@@ -85,17 +85,16 @@ typedef struct RmFmtHandlerPretty {
     int elems_written;
 } RmFmtHandlerPretty;
 
-static void rm_fmt_head(_UNUSED RmSession *session, RmFmtHandler *parent,
-                        _UNUSED FILE *out) {
+static void rm_fmt_head(_UNUSED RmSession *session, RmFmtHandler *parent) {
     RmFmtHandlerPretty *self = (RmFmtHandlerPretty *)parent;
 
     self->user = rm_util_get_username();
     self->group = rm_util_get_groupname();
 }
 
-static void rm_fmt_elem(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *out,
-                        RmFile *file) {
+static void rm_fmt_elem(_UNUSED RmSession *session, RmFmtHandler *parent, RmFile *file) {
     RmFmtHandlerPretty *self = (RmFmtHandlerPretty *)parent;
+    FILE *out = parent->out;
 
     if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
         /* pretty output should not contain this */
@@ -148,30 +147,30 @@ static void rm_fmt_elem(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *
     g_free(esc_path);
 }
 
-static void rm_fmt_prog(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *out,
+static void rm_fmt_prog(_UNUSED RmSession *session, RmFmtHandler *parent,
                         RmFmtProgressState state) {
     RmFmtHandlerPretty *self = (RmFmtHandlerPretty *)parent;
 
     if(state == RM_PROGRESS_STATE_PRE_SHUTDOWN && self->elems_written) {
-        fprintf(out, "\n");
+        fprintf(parent->out, "\n");
     }
 }
 
-static RmFmtHandlerPretty PRETTY_HANDLER_IMPL = {
+/* API hooks for RM_FMT_REGISTER in formats.c */
+
+const char *PRETTY_HANDLER_NAME = "pretty";
+
+const char *PRETTY_HANDLER_VALID_KEYS[] = {NULL};
+
+RmFmtHandler *PRETTY_HANDLER_NEW(void) {
+    RmFmtHandlerPretty *handler = g_new0(RmFmtHandlerPretty, 1);
     /* Initialize parent */
-    .parent =
-        {
-            .size = sizeof(PRETTY_HANDLER_IMPL),
-            .name = "pretty",
-            .head = rm_fmt_head,
-            .elem = rm_fmt_elem,
-            .prog = rm_fmt_prog,
-            .foot = NULL,
-            .valid_keys = {NULL},
-        },
+    handler->parent.head = rm_fmt_head;
+    handler->parent.elem = rm_fmt_elem;
+    handler->parent.prog = rm_fmt_prog;
 
-    /* Initialize own stuff */
-    .last_lint_type = RM_LINT_TYPE_UNKNOWN,
-    .elems_written = 0};
+    /* initialise any non-null handler-specific fields */
+    handler->last_lint_type = RM_LINT_TYPE_UNKNOWN;
 
-RmFmtHandler *PRETTY_HANDLER = (RmFmtHandler *)&PRETTY_HANDLER_IMPL;
+    return (RmFmtHandler *)handler;
+};

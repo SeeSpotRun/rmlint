@@ -36,11 +36,6 @@ static const char PY_SOURCE[] = "<<PYTHON_SOURCE>>";
 typedef struct RmFmtHandlerPy {
     /* must be first */
     RmFmtHandler parent;
-
-    /* HACK: Actual handler might be bigger, add padding. */
-    /* DJT: huh? */
-    char _dummy[1024];
-
 } RmFmtHandlerPy;
 
 /////////////////////////

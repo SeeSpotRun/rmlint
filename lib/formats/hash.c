@@ -33,7 +33,7 @@
 typedef struct RmFmtHandlerHash {
     /* must be first */
     RmFmtHandler parent;
-} RmFmtHandlerProgress;
+} RmFmtHandlerHash;
 
 static void rm_fmt_head(RmSession *session, _UNUSED RmFmtHandler *parent, FILE *out) {
     if(rm_fmt_get_config_value("hash", "header")) {
@@ -60,7 +60,7 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
     fprintf(out, "%s %s\n", checksum_str, file_path);
 }
 
-static RmFmtHandlerProgress HASH_HANDLER_IMPL = {
+static RmFmtHandlerHash HASH_HANDLER_IMPL = {
     /* Initialize parent */
     .parent = {
         .size = sizeof(HASH_HANDLER_IMPL),

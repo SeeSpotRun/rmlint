@@ -38,7 +38,7 @@
 typedef struct RmFmtHandlerCSV {
     /* must be first */
     RmFmtHandler parent;
-} RmFmtHandlerProgress;
+} RmFmtHandlerCSV;
 
 static void rm_fmt_head(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent,
                         FILE *out) {
@@ -76,7 +76,7 @@ static void rm_fmt_elem(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent
     g_free(clean_path);
 }
 
-static RmFmtHandlerProgress CSV_HANDLER_IMPL = {
+static RmFmtHandlerCSV CSV_HANDLER_IMPL = {
     /* Initialize parent */
     .parent = {
         .size = sizeof(CSV_HANDLER_IMPL),

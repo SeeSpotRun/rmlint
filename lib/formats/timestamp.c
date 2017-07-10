@@ -33,7 +33,7 @@
 typedef struct RmFmtHandlerTimestamp {
     /* must be first */
     RmFmtHandler parent;
-} RmFmtHandlerSummary;
+} RmFmtHandlerTimestamp;
 
 static void rm_fmt_prog(_UNUSED RmSession *session,
                         _UNUSED RmFmtHandler *parent,
@@ -54,7 +54,7 @@ static void rm_fmt_prog(_UNUSED RmSession *session,
     }
 }
 
-static RmFmtHandlerSummary TIMESTAMP_HANDLER_IMPL = {
+static RmFmtHandlerTimestamp TIMESTAMP_HANDLER_IMPL = {
     /* Initialize parent */
     .parent =
         {

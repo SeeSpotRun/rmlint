@@ -83,11 +83,11 @@ typedef struct RmFmtHandlerPretty {
     const char *user;
     const char *group;
     int elems_written;
-} RmFmtHandlerProgress;
+} RmFmtHandlerPretty;
 
 static void rm_fmt_head(_UNUSED RmSession *session, RmFmtHandler *parent,
                         _UNUSED FILE *out) {
-    RmFmtHandlerProgress *self = (RmFmtHandlerProgress *)parent;
+    RmFmtHandlerPretty *self = (RmFmtHandlerPretty *)parent;
 
     self->user = rm_util_get_username();
     self->group = rm_util_get_groupname();
@@ -95,7 +95,7 @@ static void rm_fmt_head(_UNUSED RmSession *session, RmFmtHandler *parent,
 
 static void rm_fmt_elem(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *out,
                         RmFile *file) {
-    RmFmtHandlerProgress *self = (RmFmtHandlerProgress *)parent;
+    RmFmtHandlerPretty *self = (RmFmtHandlerPretty *)parent;
 
     if(file->lint_type == RM_LINT_TYPE_UNIQUE_FILE) {
         /* pretty output should not contain this */
@@ -150,14 +150,14 @@ static void rm_fmt_elem(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *
 
 static void rm_fmt_prog(_UNUSED RmSession *session, RmFmtHandler *parent, FILE *out,
                         RmFmtProgressState state) {
-    RmFmtHandlerProgress *self = (RmFmtHandlerProgress *)parent;
+    RmFmtHandlerPretty *self = (RmFmtHandlerPretty *)parent;
 
     if(state == RM_PROGRESS_STATE_PRE_SHUTDOWN && self->elems_written) {
         fprintf(out, "\n");
     }
 }
 
-static RmFmtHandlerProgress PRETTY_HANDLER_IMPL = {
+static RmFmtHandlerPretty PRETTY_HANDLER_IMPL = {
     /* Initialize parent */
     .parent =
         {

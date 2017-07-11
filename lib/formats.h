@@ -203,7 +203,7 @@ const char *rm_fmt_get_config_value(RmFmtTable *self, const char *formatter,
  *
  * @return true if yes, false otherwise.
  */
-bool rm_fmt_is_valid_key(RmFmtTable *self, const char *formatter, const char *key);
+bool rm_fmt_is_valid_key(const char *formatter, const char *key);
 
 /**
  * @brief Check if path is a set output of RmFmtTable.

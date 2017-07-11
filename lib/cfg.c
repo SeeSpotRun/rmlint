@@ -405,7 +405,7 @@ static bool rm_cfg_parse_config_pair(RmCfg *cfg, const char *pair, GError **erro
     }
 
     char *formatter = g_strndup(pair, domain - pair);
-    if(!rm_fmt_is_valid_key(cfg->formats, formatter, key)) {
+    if(!rm_fmt_is_valid_key(formatter, key)) {
         g_set_error(error, RM_ERROR_QUARK, 0, _("Invalid key `%s' for formatter `%s'"),
                     key, formatter);
         g_free(key);

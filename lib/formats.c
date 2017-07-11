@@ -31,14 +31,17 @@
 #include "file.h"
 #include "formats.h"
 
+/* maps handler name to RmFmtHandlerNew func defined in formats/???.c
+ * e.g. "progressbar" maps to formats/progress.c/PROGRESS_HANDLER_NEW() */
+static GHashTable *RM_FMT_NAME_TO_HANDLER_NEW = NULL;
+
+/* maps handler name to null-terminated strv of valid keys */
+static GHashTable *RM_FMT_NAME_TO_VALID_KEYS = NULL;
+
+/* lock for write access to the above maps */
+static GMutex RM_FMT_MAP_WRITE_MTX;
+
 struct _RmFmtTable {
-    /* maps handler name to RmFmtHandlerNew func defined in formats/???.c
-     * e.g. "progressbar" maps to formats/progress.c/PROGRESS_HANDLER_NEW() */
-    GHashTable *name_to_handler_new;
-
-    /* maps handler name to null-terminated strv of valid keys */
-    GHashTable *name_to_valid_keys;
-
     /* set of output paths (used to check whether a path is an output). */
     GHashTable *paths;
 
@@ -115,26 +118,68 @@ static void rm_fmt_handler_free(RmFmtHandler *handler) {
     g_free(handler);
 }
 
-#define RM_FMT_REGISTER(handler)                                                        \
-    {                                                                                   \
-        extern char *handler##_NAME;                                                    \
-        extern char *handler##_VALID_KEYS[];                                            \
-        extern RmFmtHandlerNew handler##_NEW;                                           \
-        if(g_hash_table_contains(self->name_to_handler_new, handler##_NAME)) {          \
-            rm_log_error_line("Duplicate handler name: %s", handler##_NAME);            \
-            g_assert_not_reached();                                                     \
-        }                                                                               \
-        g_hash_table_insert(self->name_to_handler_new, handler##_NAME, &handler##_NEW); \
-        g_hash_table_insert(self->name_to_valid_keys, handler##_NAME,                   \
-                            handler##_VALID_KEYS);                                      \
+#define RM_FMT_REGISTER(handler)                                                         \
+    {                                                                                    \
+        extern char *handler##_NAME;                                                     \
+        extern char *handler##_VALID_KEYS[];                                             \
+        extern RmFmtHandlerNew handler##_NEW;                                            \
+        if(g_hash_table_contains(RM_FMT_NAME_TO_HANDLER_NEW, handler##_NAME)) {          \
+            rm_log_error_line("Duplicate handler name: %s", handler##_NAME);             \
+            g_assert_not_reached();                                                      \
+        }                                                                                \
+        g_hash_table_insert(RM_FMT_NAME_TO_HANDLER_NEW, handler##_NAME, &handler##_NEW); \
+        g_hash_table_insert(RM_FMT_NAME_TO_VALID_KEYS, handler##_NAME,                   \
+                            handler##_VALID_KEYS);                                       \
     }
+
+static void rm_fmt_maybe_register_handlers(void) {
+    g_mutex_lock(&RM_FMT_MAP_WRITE_MTX);
+    {
+        if(RM_FMT_NAME_TO_HANDLER_NEW == NULL) {
+            RM_FMT_NAME_TO_HANDLER_NEW =
+                g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
+            RM_FMT_NAME_TO_VALID_KEYS =
+                g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
+
+            RM_FMT_REGISTER(PROGRESS_HANDLER);
+            RM_FMT_REGISTER(CSV_HANDLER);
+            RM_FMT_REGISTER(PRETTY_HANDLER);
+            RM_FMT_REGISTER(SH_SCRIPT_HANDLER);
+            RM_FMT_REGISTER(SUMMARY_HANDLER);
+            RM_FMT_REGISTER(TIMESTAMP_HANDLER);
+            RM_FMT_REGISTER(JSON_HANDLER);
+            RM_FMT_REGISTER(PY_HANDLER);
+            RM_FMT_REGISTER(FDUPES_HANDLER);
+            RM_FMT_REGISTER(UNIQUES_HANDLER);
+            RM_FMT_REGISTER(NULL_HANDLER);
+            RM_FMT_REGISTER(STATS_HANDLER);
+            RM_FMT_REGISTER(EQUAL_HANDLER);
+            RM_FMT_REGISTER(HASH_HANDLER);
+        }
+    }
+    g_mutex_unlock(&RM_FMT_MAP_WRITE_MTX);
+}
+
+static void rm_fmt_maybe_unregister_handlers(void) {
+    g_mutex_lock(&RM_FMT_MAP_WRITE_MTX);
+    {
+        if(RM_FMT_NAME_TO_HANDLER_NEW) {
+            g_hash_table_unref(RM_FMT_NAME_TO_HANDLER_NEW);
+            RM_FMT_NAME_TO_HANDLER_NEW = NULL;
+
+            g_hash_table_unref(RM_FMT_NAME_TO_VALID_KEYS);
+            RM_FMT_NAME_TO_VALID_KEYS = NULL;
+        }
+    }
+    g_mutex_unlock(&RM_FMT_MAP_WRITE_MTX);
+}
 
 RmFmtTable *rm_fmt_open(RmSession *session) {
     g_assert(session);
+
+    rm_fmt_maybe_register_handlers();
+
     RmFmtTable *self = g_slice_new0(RmFmtTable);
-    self->name_to_handler_new =
-        g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
-    self->name_to_valid_keys = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
     self->paths = g_hash_table_new(g_str_hash, g_str_equal);
     self->active_handler_names = g_hash_table_new(g_str_hash, g_str_equal);
 
@@ -147,21 +192,6 @@ RmFmtTable *rm_fmt_open(RmSession *session) {
     g_queue_init(&self->groups);
     g_rec_mutex_init(&self->state_mtx);
 
-    RM_FMT_REGISTER(PROGRESS_HANDLER);
-    RM_FMT_REGISTER(CSV_HANDLER);
-    RM_FMT_REGISTER(PRETTY_HANDLER);
-    RM_FMT_REGISTER(SH_SCRIPT_HANDLER);
-    RM_FMT_REGISTER(SUMMARY_HANDLER);
-    RM_FMT_REGISTER(TIMESTAMP_HANDLER);
-    RM_FMT_REGISTER(JSON_HANDLER);
-    RM_FMT_REGISTER(PY_HANDLER);
-    RM_FMT_REGISTER(FDUPES_HANDLER);
-    RM_FMT_REGISTER(UNIQUES_HANDLER);
-    RM_FMT_REGISTER(NULL_HANDLER);
-    RM_FMT_REGISTER(STATS_HANDLER);
-    RM_FMT_REGISTER(EQUAL_HANDLER);
-    RM_FMT_REGISTER(HASH_HANDLER);
-
     return self;
 }
 
@@ -173,9 +203,11 @@ int rm_fmt_len(RmFmtTable *self) {
     }
 }
 
-bool rm_fmt_is_valid_key(RmFmtTable *self, const char *formatter, const char *key) {
+bool rm_fmt_is_valid_key(const char *formatter, const char *key) {
+    rm_fmt_maybe_register_handlers();
+
     const char *const *valid_keys =
-        g_hash_table_lookup(self->name_to_valid_keys, formatter);
+        g_hash_table_lookup(RM_FMT_NAME_TO_VALID_KEYS, formatter);
     return (valid_keys && rm_util_strv_contains(valid_keys, key));
 }
 
@@ -205,8 +237,10 @@ void rm_fmt_clear(RmFmtTable *self) {
     g_mutex_unlock(&handler->print_mtx);
 
 bool rm_fmt_add(RmFmtTable *self, const char *handler_name, const char *path) {
+    rm_fmt_maybe_register_handlers();
+
     RmFmtHandlerNew *new_handler_func =
-        g_hash_table_lookup(self->name_to_handler_new, handler_name);
+        g_hash_table_lookup(RM_FMT_NAME_TO_HANDLER_NEW, handler_name);
     if(new_handler_func == NULL) {
         rm_log_warning_line(_("No such new_handler with this name: %s"), handler_name);
         return false;
@@ -365,8 +399,7 @@ void rm_fmt_close(RmFmtTable *self) {
         g_mutex_clear(&handler->print_mtx);
     }
 
-    g_hash_table_unref(self->name_to_handler_new);
-    g_hash_table_unref(self->name_to_valid_keys);
+    rm_fmt_maybe_unregister_handlers();
     g_hash_table_unref(self->paths);
     g_hash_table_unref(self->config);
     g_hash_table_unref(self->active_handler_names);

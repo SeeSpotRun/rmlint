@@ -366,19 +366,19 @@ static void rm_fmt_prog(RmSession *session,
     if(state == RM_PROGRESS_STATE_INIT) {
         /* Do initializiation here */
         const char *update_interval_str =
-            rm_fmt_get_config_value("progressbar", "update_interval");
+            rm_fmt_get_config_value(cfg->formats, "progressbar", "update_interval");
 
         rm_running_mean_init(&self->read_diff_mean, 10);
         rm_running_mean_init(&self->eta_mean, 50);
         self->last_shred_bytes_remaining = 0;
 
         self->plain = true;
-        if(rm_fmt_get_config_value("progressbar", "fancy") != NULL) {
+        if(rm_fmt_get_config_value(cfg->formats, "progressbar", "fancy") != NULL) {
             self->plain = false;
         }
 
         self->use_unicode_glyphs = true;
-        if(rm_fmt_get_config_value("progressbar", "ascii") != NULL) {
+        if(rm_fmt_get_config_value(cfg->formats, "progressbar", "ascii") != NULL) {
             self->use_unicode_glyphs = false;
         }
 
@@ -459,7 +459,7 @@ const char *PROGRESS_HANDLER_NAME = "progressbar";
 
 const char *PROGRESS_HANDLER_VALID_KEYS[] = {"update_interval", "ascii", "fancy", NULL};
 
-RmFmtHandler *PROGRESS_HANDLER_NEW(void) {
+RmFmtHandler *PROGRESS_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerProgress *handler = g_new0(RmFmtHandlerProgress, 1);
     handler->parent.prog = rm_fmt_prog;
 

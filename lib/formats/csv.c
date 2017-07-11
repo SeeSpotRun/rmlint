@@ -41,7 +41,7 @@ typedef struct RmFmtHandlerCSV {
 } RmFmtHandlerCSV;
 
 static void rm_fmt_head(_UNUSED RmSession *session, _UNUSED RmFmtHandler *parent) {
-    if(rm_fmt_get_config_value("csv", "no_header")) {
+    if(rm_fmt_get_config_value(session->cfg->formats, "csv", "no_header")) {
         return;
     }
 
@@ -81,7 +81,7 @@ const char *CSV_HANDLER_NAME = "csv";
 
 const char *CSV_HANDLER_VALID_KEYS[] = {"no_header", NULL};
 
-RmFmtHandler *CSV_HANDLER_NEW(void) {
+RmFmtHandler *CSV_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerCSV *handler = g_new0(RmFmtHandlerCSV, 1);
 
     /* Initialize parent */

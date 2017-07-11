@@ -35,7 +35,7 @@ const char *NULL_HANDLER_NAME = "null";
 
 const char *NULL_HANDLER_VALID_KEYS[] = {NULL};
 
-RmFmtHandler *NULL_HANDLER_NEW(void) {
+RmFmtHandler *NULL_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerNull *handler = g_new0(RmFmtHandlerNull, 1);
     /* Initialize parent */
 

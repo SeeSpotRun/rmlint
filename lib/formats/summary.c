@@ -35,8 +35,9 @@
 typedef struct RmFmtHandlerSummary {
     /* must be first */
     RmFmtHandler parent;
+
     gboolean first_print_flag;
-    RmSession *session;  // temporary hack; TODO: better way
+    RmSession *session; // TODO: find less hacky way
 } RmFmtHandlerSummary;
 
 #define ARROW \
@@ -98,7 +99,8 @@ static void rm_fmt_prog(RmSession *session,
         ARROW fprintf(out, _("Early shutdown, probably not all lint was found.\n"));
     }
 
-    if(rm_fmt_has_formatter("pretty") && rm_fmt_has_formatter("sh")) {
+    if(rm_fmt_has_formatter(session->cfg->formats, "pretty") &&
+       rm_fmt_has_formatter(session->cfg->formats, "sh")) {
         ARROW fprintf(out, _("Note: Please use the saved script below for removal, not "
                              "the above output."));
         fprintf(out, "\n");
@@ -140,7 +142,7 @@ static void rm_fmt_prog(RmSession *session,
 
     self->first_print_flag = true;
     self->session = session;
-    rm_fmt_foreach((GFunc)list_handlers, self);
+    rm_fmt_foreach_handler(session->cfg->formats, (GFunc)list_handlers, self);
 }
 
 /* API hooks for RM_FMT_REGISTER in formats.c */
@@ -149,7 +151,7 @@ const char *SUMMARY_HANDLER_NAME = "summary";
 
 const char *SUMMARY_HANDLER_VALID_KEYS[] = {NULL};
 
-RmFmtHandler *SUMMARY_HANDLER_NEW(void) {
+RmFmtHandler *SUMMARY_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerSummary *handler = g_new0(RmFmtHandlerSummary, 1);
     /* Initialize parent */
     handler->parent.prog = rm_fmt_prog;

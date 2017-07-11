@@ -35,14 +35,14 @@ typedef struct RmFmtHandlerTimestamp {
     RmFmtHandler parent;
 } RmFmtHandlerTimestamp;
 
-static void rm_fmt_prog(_UNUSED RmSession *session,
+static void rm_fmt_prog(RmSession *session,
                         _UNUSED RmFmtHandler *parent,
                         RmFmtProgressState state) {
     if(state != RM_PROGRESS_STATE_INIT) {
         return;
     }
 
-    if(rm_fmt_get_config_value("stamp", "iso8601")) {
+    if(rm_fmt_get_config_value(session->cfg->formats, "stamp", "iso8601")) {
         char time_buf[256];
         memset(time_buf, 0, sizeof(time_buf));
         rm_iso8601_format(time(NULL), time_buf, sizeof(time_buf));
@@ -59,7 +59,7 @@ const char *TIMESTAMP_HANDLER_NAME = "stamp";
 
 const char *TIMESTAMP_HANDLER_VALID_KEYS[] = {"iso8601", NULL};
 
-RmFmtHandler *TIMESTAMP_HANDLER_NEW(void) {
+RmFmtHandler *TIMESTAMP_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerTimestamp *handler = g_new0(RmFmtHandlerTimestamp, 1);
     /* Initialize parent */
     handler->parent.prog = rm_fmt_prog;

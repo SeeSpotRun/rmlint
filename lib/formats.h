@@ -50,6 +50,9 @@ typedef enum RmFmtProgressState {
     RM_PROGRESS_STATE_N
 } RmFmtProgressState;
 
+/* Opaque container for a set of RmFmtHandlers */
+typedef struct _RmFmtTable RmFmtTable;
+
 /* Callback definitions */
 struct RmFmtHandler;
 
@@ -94,53 +97,63 @@ typedef struct RmFmtHandler {
     FILE *out;
 } RmFmtHandler;
 
-typedef RmFmtHandler *(*RmFmtHandlerNew)(void);
+typedef RmFmtHandler *(RmFmtHandlerNew)(RmFmtTable *table);
 
 ////////////////////
 //   PUBLIC API   //
 ////////////////////
 
 /**
- * @brief Initialise formats.
+ * @brief Allocate a new RmFmtTable.
  *
+ * The table can be used to multiplex a finished RmFile to several output files
+ * with different formats for each.
+ *
+ * @return A newly allocated RmFmtTable.
  */
-void rm_fmt_open(RmSession *session);
+RmFmtTable *rm_fmt_open(RmSession *session);
 
 /**
  * @brief Close all open file, but write a footer to them if the handler wants it.
  */
-void rm_fmt_close(void);
+void rm_fmt_close(RmFmtTable *self);
 
 /**
  * @brief If cfg->cache_file_structs is true,
  *        all files written by rm_fmt_write can
  *        be flushed at once with this function.
+ *
+ * @param self
  */
-void rm_fmt_flush(void);
+void rm_fmt_flush(RmFmtTable *self);
 
 /**
  * @brief Get the number of added formatters.
  *
+ * @param self The table.
+ *
  * @return -1 or error, number on success
  */
-int rm_fmt_len(void);
+int rm_fmt_len(RmFmtTable *self);
 
 /**
  * @brief Clear all previously added formatters.
+ *
+ * @param self table to clear.
  */
-void rm_fmt_clear(void);
+void rm_fmt_clear(RmFmtTable *self);
 
 /**
  * @brief Register a new handle to the table.
  *
  * This is only interesting to add new Handlers for new formats.
  */
-void rm_fmt_register(RmFmtHandler *handler);
+void rm_fmt_register(RmFmtTable *self, RmFmtHandler *handler);
 
 /**
  * @brief Register a new handler that handles writing to path when getting input.
  */
-bool rm_fmt_add(const char *handler_name, const char *path);
+bool rm_fmt_add(RmFmtTable *self, const char *handler_name, const char *path);
 
 /**
  * @brief Make all handlers write a ouput line to their respective file.
@@ -149,7 +162,7 @@ bool rm_fmt_add(const char *handler_name, const char *path);
  * implementation of the handler - it might also do just nothing.
  * @note argument order is to enable calling via g_queue_foreach()
  */
-void rm_fmt_write(RmFile *result, gint64 twin_count);
+void rm_fmt_write(RmFile *result, RmFmtTable *self, gint64 twin_count);
 
 /**
  * @brief Change the state of rmlint.
@@ -160,7 +173,7 @@ void rm_fmt_write(RmFile *result, gint64 twin_count);
  * Callers should make sure that this function is not called on every increment,
  * as it needs to iterate over all handlers:
  */
-void rm_fmt_set_state(RmFmtProgressState state);
+void rm_fmt_set_state(RmFmtTable *self, RmFmtProgressState state);
 
 /**
  * @brief Convert state to a human readable string. Static storage, do not free.
@@ -174,55 +187,54 @@ const char *rm_fmt_progress_to_string(RmFmtProgressState state);
  * @param key The key to set.
  * @param value The value to set.
  */
-void rm_fmt_set_config_value(const char *formatter, const char *key, const char *value);
+void rm_fmt_set_config_value(RmFmtTable *self, const char *formatter, const char *key,
+                             const char *value);
 
 /**
  * @brief Get a configuration value.
  *
  * @return NULL if not foumd, the value for this key. Memory owned by RmFmtTable.
  */
-const char *rm_fmt_get_config_value(const char *formatter, const char *key);
+const char *rm_fmt_get_config_value(RmFmtTable *self, const char *formatter,
+                                    const char *key);
 
 /**
  * @brief Check if the formatter "formatter" has a config value called key.
  *
  * @return true if yes, false otherwise.
  */
-bool rm_fmt_is_valid_key(const char *formatter, const char *key);
+bool rm_fmt_is_valid_key(RmFmtTable *self, const char *formatter, const char *key);
 
 /**
  * @brief Check if path is a set output of RmFmtTable.
  *
  * @return true if it is.
  */
-bool rm_fmt_is_a_output(const char *path);
+bool rm_fmt_is_a_output(RmFmtTable *self, const char *path);
 
 /**
  * @brief Lock the state mutex.
  *
  * Use this to threadsafely update statistic counters.
  */
-void rm_fmt_lock_state(void);
+void rm_fmt_lock_state(RmFmtTable *self);
 
 /**
  * @brief Pendant to rm_fmt_lock_state()
  */
-void rm_fmt_unlock_state(void);
+void rm_fmt_unlock_state(RmFmtTable *self);
 
 /**
  * @brief Check if a certain handler is writting to a stream.
  */
-bool rm_fmt_is_stream(RmFmtHandler *handler);
+bool rm_fmt_is_stream(RmFmtTable *self, RmFmtHandler *handler);
 
 /**
  * @brief Check if there is at least one formatter with `name`.
  */
-bool rm_fmt_has_formatter(const char *name);
+bool rm_fmt_has_formatter(RmFmtTable *self, const char *name);
 
-/**
- * @brief call func(handler, user_data) for each active RmFmtHandler
- */
-void rm_fmt_foreach(GFunc func, gpointer user_data);
+void rm_fmt_foreach_handler(RmFmtTable *self, GFunc func, gpointer user_data);
 
 /**
  * You can use this template for implementing new RmFmtHandlers.

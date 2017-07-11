@@ -36,7 +36,7 @@ typedef struct RmFmtHandlerHash {
 } RmFmtHandlerHash;
 
 static void rm_fmt_head(RmSession *session, RmFmtHandler *parent) {
-    if(rm_fmt_get_config_value("hash", "header")) {
+    if(rm_fmt_get_config_value(session->cfg->formats, "hash", "header")) {
         fprintf(parent->out, "%s    %s\n",
                 rm_digest_type_to_string(session->cfg->checksum_type), "path");
     }
@@ -66,7 +66,7 @@ const char *HASH_HANDLER_NAME = "hash";
 
 const char *HASH_HANDLER_VALID_KEYS[] = {"header", NULL};
 
-RmFmtHandler *HASH_HANDLER_NEW(void) {
+RmFmtHandler *HASH_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerHash *handler = g_new0(RmFmtHandlerHash, 1);
     /* Initialize parent */
     handler->parent.head = rm_fmt_head;

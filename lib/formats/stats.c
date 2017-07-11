@@ -140,7 +140,7 @@ const char *STATS_HANDLER_NAME = "stats";
 
 const char *STATS_HANDLER_VALID_KEYS[] = {NULL};
 
-RmFmtHandler *STATS_HANDLER_NEW(void) {
+RmFmtHandler *STATS_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerStats *handler = g_new0(RmFmtHandlerStats, 1);
     /* Initialize parent */
     handler->parent.prog = rm_fmt_prog;

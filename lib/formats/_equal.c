@@ -125,7 +125,7 @@ const char *EQUAL_HANDLER_NAME = "_equal";
 
 const char *EQUAL_HANDLER_VALID_KEYS[] = {NULL};
 
-RmFmtHandler *EQUAL_HANDLER_NEW(void) {
+RmFmtHandler *EQUAL_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerEqual *handler = g_new0(RmFmtHandlerEqual, 1);
     /* Initialize parent */
     handler->parent.head = rm_fmt_head;

@@ -154,7 +154,7 @@ typedef struct RmCfg {
     gboolean run_equal_mode;
 
     /* Output formatting control */
-    struct RmFmtTable *formats;
+    struct _RmFmtTable *formats;
 
     /* count used for determining the verbosity level */
     int verbosity_count;

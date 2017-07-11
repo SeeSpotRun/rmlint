@@ -369,7 +369,7 @@ static bool rm_cfg_parse_output_pair(RmCfg *cfg, const char *pair, GError **erro
         strncpy(format_name, pair, MIN((long)sizeof(format_name), separator - pair));
     }
 
-    if(!rm_fmt_add(format_name, full_path)) {
+    if(!rm_fmt_add(cfg->formats, format_name, full_path)) {
         g_set_error(error, RM_ERROR_QUARK, 0, _("Adding -o %s as output failed"), pair);
         return false;
     }
@@ -377,7 +377,7 @@ static bool rm_cfg_parse_output_pair(RmCfg *cfg, const char *pair, GError **erro
     return true;
 }
 
-static bool rm_cfg_parse_config_pair(const char *pair, GError **error) {
+static bool rm_cfg_parse_config_pair(RmCfg *cfg, const char *pair, GError **error) {
     char *domain = strchr(pair, ':');
     if(domain == NULL) {
         g_set_error(error, RM_ERROR_QUARK, 0,
@@ -405,14 +405,14 @@ static bool rm_cfg_parse_config_pair(const char *pair, GError **error) {
     }
 
     char *formatter = g_strndup(pair, domain - pair);
-    if(!rm_fmt_is_valid_key(formatter, key)) {
+    if(!rm_fmt_is_valid_key(cfg->formats, formatter, key)) {
         g_set_error(error, RM_ERROR_QUARK, 0, _("Invalid key `%s' for formatter `%s'"),
                     key, formatter);
         g_free(key);
         g_free(value);
         result = false;
     } else {
-        rm_fmt_set_config_value(formatter, key, value);
+        rm_fmt_set_config_value(cfg->formats, formatter, key, value);
     }
 
     g_free(formatter);
@@ -422,9 +422,9 @@ static bool rm_cfg_parse_config_pair(const char *pair, GError **error) {
 
 static gboolean rm_cfg_parse_config(_UNUSED const char *option_name,
                                     const char *pair,
-                                    _UNUSED RmCfg *cfg,
-                                    GError **error) {
-    return rm_cfg_parse_config_pair(pair, error);
+                                    RmCfg *cfg,
+                                    _UNUSED GError **error) {
+    return rm_cfg_parse_config_pair(cfg, pair, error);
 }
 
 static double rm_cfg_parse_clamp_factor(const char *string, GError **error) {
@@ -707,10 +707,11 @@ static gboolean rm_cfg_parse_timestamp_file(const char *option_name,
         return false;
     }
 
-    rm_fmt_add("stamp", timestamp_path);
+    rm_fmt_add(cfg->formats, "stamp", timestamp_path);
     if(!plain) {
         /* Enable iso8601 timestamp output */
-        rm_fmt_set_config_value("stamp", g_strdup("iso8601"), g_strdup("true"));
+        rm_fmt_set_config_value(cfg->formats, "stamp", g_strdup("iso8601"),
+                                g_strdup("true"));
     }
 
     return success;
@@ -841,9 +842,9 @@ static gboolean rm_cfg_parse_clamp_top(_UNUSED const char *option_name, const gc
 static gboolean rm_cfg_parse_progress(_UNUSED const char *option_name,
                                       _UNUSED const gchar *value, RmCfg *cfg,
                                       _UNUSED GError **error) {
-    rm_fmt_clear();
-    rm_fmt_add("progressbar", "stdout");
-    rm_fmt_add("summary", "stdout");
+    rm_fmt_clear(cfg->formats);
+    rm_fmt_add(cfg->formats, "progressbar", "stdout");
+    rm_fmt_add(cfg->formats, "summary", "stdout");
 
     cfg->progress_enabled = true;
 
@@ -851,22 +852,22 @@ static gboolean rm_cfg_parse_progress(_UNUSED const char *option_name,
 }
 
 static void rm_cfg_set_default_outputs(RmCfg *cfg) {
-    rm_fmt_add("pretty", "stdout");
-    rm_fmt_add("summary", "stdout");
+    rm_fmt_add(cfg->formats, "pretty", "stdout");
+    rm_fmt_add(cfg->formats, "summary", "stdout");
 
     if(cfg->replay) {
-        rm_fmt_add("sh", "rmlint.replay.sh");
-        rm_fmt_add("json", "rmlint.replay.json");
+        rm_fmt_add(cfg->formats, "sh", "rmlint.replay.sh");
+        rm_fmt_add(cfg->formats, "json", "rmlint.replay.json");
     } else {
-        rm_fmt_add("sh", "rmlint.sh");
-        rm_fmt_add("json", "rmlint.json");
+        rm_fmt_add(cfg->formats, "sh", "rmlint.sh");
+        rm_fmt_add(cfg->formats, "json", "rmlint.json");
     }
 }
 
 static gboolean rm_cfg_parse_no_progress(_UNUSED const char *option_name,
                                          _UNUSED const gchar *value, RmCfg *cfg,
                                          _UNUSED GError **error) {
-    rm_fmt_clear();
+    rm_fmt_clear(cfg->formats);
     rm_cfg_set_default_outputs(cfg);
     rm_cfg_set_verbosity_from_cnt(cfg, cfg->verbosity_count);
     return true;
@@ -1062,8 +1063,8 @@ static gboolean rm_cfg_parse_equal(_UNUSED const char *option_name,
     cfg->limits_specified = true;
     cfg->minsize = 0;
 
-    rm_fmt_clear();
-    rm_fmt_add("_equal", "stdout");
+    rm_fmt_clear(cfg->formats);
+    rm_fmt_add(cfg->formats, "_equal", "stdout");
     return true;
 }
 
@@ -1161,7 +1162,7 @@ void rm_cfg_init(RmCfg *cfg) {
 }
 
 void rm_cfg_clear(RmCfg *cfg) {
-    rm_fmt_close();
+    rm_fmt_close(cfg->formats);
 
     g_free(cfg->sort_criteria);
 
@@ -1384,18 +1385,18 @@ bool rm_cfg_parse_args(int argc, char **argv, RmCfg *cfg) {
     }
 
     if(cfg->progress_enabled) {
-        if(!rm_fmt_has_formatter("sh")) {
-            rm_fmt_add("sh", "rmlint.sh");
+        if(!rm_fmt_has_formatter(cfg->formats, "sh")) {
+            rm_fmt_add(cfg->formats, "sh", "rmlint.sh");
         }
 
-        if(!rm_fmt_has_formatter("json")) {
-            rm_fmt_add("json", "rmlint.json");
+        if(!rm_fmt_has_formatter(cfg->formats, "json")) {
+            rm_fmt_add(cfg->formats, "json", "rmlint.json");
         }
     }
 
     if(cfg->hash) {
-        rm_fmt_clear();
-        rm_fmt_add("hash", "stdout");
+        rm_fmt_clear(cfg->formats);
+        rm_fmt_add(cfg->formats, "hash", "stdout");
     }
 
     /* Overwrite color if we do not print to a terminal directly */

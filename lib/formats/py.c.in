@@ -59,7 +59,7 @@ const char *PY_HANDLER_NAME = "py";
 
 const char *PY_HANDLER_VALID_KEYS[] = {"omitfirst", "sameline", NULL};
 
-RmFmtHandler *PY_HANDLER_NEW(void) {
+RmFmtHandler *PY_HANDLER_NEW(RmFmtTable *tables) {
     RmFmtHandlerPy *handler = g_new0(RmFmtHandlerPy, 1);
     /* Initialize parent */
     handler->parent.head = rm_fmt_head;
@@ -67,7 +67,7 @@ RmFmtHandler *PY_HANDLER_NEW(void) {
     /* initialise any non-null handler-specific fields */
 
     /* Py handler needs a corresponding JSON handler */
-    rm_fmt_add("json", ".rmlint.json");
+    rm_fmt_add(tables, "json", ".rmlint.json");
 
     return (RmFmtHandler *)handler;
 };

@@ -162,7 +162,7 @@ const char *PRETTY_HANDLER_NAME = "pretty";
 
 const char *PRETTY_HANDLER_VALID_KEYS[] = {NULL};
 
-RmFmtHandler *PRETTY_HANDLER_NEW(void) {
+RmFmtHandler *PRETTY_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerPretty *handler = g_new0(RmFmtHandlerPretty, 1);
     /* Initialize parent */
     handler->parent.head = rm_fmt_head;

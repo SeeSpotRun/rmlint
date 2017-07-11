@@ -658,7 +658,7 @@ static void rm_tm_write_unfinished_cksums(RmTreeMerger *self, RmDirectory *direc
     for(GList *iter = directory->known_files.head; iter; iter = iter->next) {
         RmFile *file = iter->data;
         file->lint_type = RM_LINT_TYPE_UNIQUE_FILE;
-        rm_fmt_write(file, -1);
+        rm_fmt_write(file, self->session->cfg->formats, -1);
     }
 
     /* Recursively propagate to children */
@@ -819,7 +819,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
         }
 
         if(result_dirs.length >= 2) {
-            rm_shred_forward_to_output(&file_adaptor_group);
+            rm_shred_forward_to_output(self->session, &file_adaptor_group);
         }
 
         g_queue_clear(&file_adaptor_group);
@@ -869,7 +869,7 @@ static void rm_tm_extract(RmTreeMerger *self) {
             } else {
                 rm_shred_group_find_original(self->session, file_list,
                                              RM_SHRED_GROUP_FINISHING);
-                rm_shred_forward_to_output(file_list);
+                rm_shred_forward_to_output(self->session, file_list);
             }
         }
     }

@@ -60,7 +60,7 @@ const char *UNIQUES_HANDLER_NAME = "uniques";
 
 const char *UNIQUES_HANDLER_VALID_KEYS[] = {NULL};
 
-RmFmtHandler *UNIQUES_HANDLER_NEW(void) {
+RmFmtHandler *UNIQUES_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerUniques *handler = g_new0(RmFmtHandlerUniques, 1);
     /* Initialize parent */
     handler->parent.elem = rm_fmt_elem;

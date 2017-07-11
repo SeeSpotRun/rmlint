@@ -82,8 +82,10 @@ static void rm_fmt_prog(RmSession *session,
 
     if(state == RM_PROGRESS_STATE_INIT) {
         session->cfg->cache_file_structs = true;
-        self->omit_first_line = (rm_fmt_get_config_value("fdupes", "omitfirst") != NULL);
-        self->use_same_line = (rm_fmt_get_config_value("fdupes", "sameline") != NULL);
+        self->omit_first_line = (rm_fmt_get_config_value(session->cfg->formats, "fdupes",
+                                                         "omitfirst") != NULL);
+        self->use_same_line = (rm_fmt_get_config_value(session->cfg->formats, "fdupes",
+                                                       "sameline") != NULL);
     }
 
     if(state == RM_PROGRESS_STATE_PRE_SHUTDOWN) {
@@ -97,7 +99,7 @@ const char *FDUPES_HANDLER_NAME = "fdupes";
 
 const char *FDUPES_HANDLER_VALID_KEYS[] = {"omitfirst", "sameline", NULL};
 
-RmFmtHandler *FDUPES_HANDLER_NEW(void) {
+RmFmtHandler *FDUPES_HANDLER_NEW(_UNUSED RmFmtTable *table) {
     RmFmtHandlerFdupes *handler = g_new0(RmFmtHandlerFdupes, 1);
     /* Initialize parent */
     handler->parent.elem = rm_fmt_elem;

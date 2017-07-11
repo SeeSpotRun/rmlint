@@ -662,9 +662,9 @@ static void rm_shred_adjust_counters(RmShredTag *tag, int files, gint64 bytes) {
         rm_counter_add(RM_COUNTER_TOTAL_FILTERED_FILES, files);
     }
 
-    rm_fmt_set_state((tag->after_preprocess)
-                     ? RM_PROGRESS_STATE_SHREDDER
-                     : RM_PROGRESS_STATE_PREPROCESS);
+    rm_fmt_set_state(session->cfg->formats, (tag->after_preprocess)
+                                           ? RM_PROGRESS_STATE_SHREDDER
+                                           : RM_PROGRESS_STATE_PREPROCESS);
 
     /* fake interrupt option for debugging/testing: */
     if(tag->after_preprocess && session->cfg->fake_abort &&
@@ -1267,7 +1267,7 @@ void rm_shred_group_find_original(RmSession *session, GQueue *files,
     }
 }
 
-void rm_shred_forward_to_output(GQueue *group) {
+void rm_shred_forward_to_output(RmSession *session, GQueue *group) {
     rm_assert_gentle(group);
     rm_assert_gentle(group->head);
 
@@ -1280,7 +1280,7 @@ void rm_shred_forward_to_output(GQueue *group) {
     /* Hand it over to the printing module */
     for(GList *iter = group->head; iter; iter = iter->next) {
         RmFile *file = iter->data;
-        rm_fmt_write(file, group->length);
+        rm_fmt_write(file, session->cfg->formats, group->length);
     }
 }
 
@@ -1410,12 +1410,12 @@ static void rm_shred_group_postprocess(RmShredGroup *group, RmShredTag *tag) {
 
     /* Update statistics */
     if(group->status == RM_SHRED_GROUP_FINISHING) {
-        rm_fmt_lock_state();  /* TODO: not needed any more? */
+        rm_fmt_lock_state(tag->session->cfg->formats);
         {
             rm_counter_add(RM_COUNTER_DUP_GROUP_COUNTER, 1);
             g_queue_foreach(group->held_files, (GFunc)rm_shred_dupe_totals, NULL);
         }
-        rm_fmt_unlock_state();
+        rm_fmt_unlock_state(tag->session->cfg->formats);
     }
 
     gboolean treemerge =
@@ -1433,7 +1433,7 @@ static void rm_shred_group_postprocess(RmShredGroup *group, RmShredTag *tag) {
 
     if(!treemerge) {
         /* Output them directly, do not merge them first. */
-        rm_shred_forward_to_output(group->held_files);
+        rm_shred_forward_to_output(tag->session, group->held_files);
     }
 
     if(group->status == RM_SHRED_GROUP_FINISHING) {
@@ -1726,7 +1726,7 @@ void rm_shred_run(RmSession *session) {
                                (RmHasherCallback)rm_shred_hash_callback,
                                &tag);
 
-    rm_fmt_set_state(RM_PROGRESS_STATE_SHREDDER);
+    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_SHREDDER);
 
     rm_counter_set(RM_COUNTER_SHRED_BYTES_TOTAL,
                    rm_counter_get(RM_COUNTER_SHRED_BYTES_REMAINING));
@@ -1737,7 +1737,7 @@ void rm_shred_run(RmSession *session) {
     rm_hasher_free(tag.hasher, TRUE);
 
     session->shredder_finished = TRUE;
-    rm_fmt_set_state(RM_PROGRESS_STATE_SHREDDER);
+    rm_fmt_set_state(session->cfg->formats, RM_PROGRESS_STATE_SHREDDER);
 
     /* This should not block, or at least only very short. */
     g_thread_pool_free(tag.result_pool, FALSE, TRUE);

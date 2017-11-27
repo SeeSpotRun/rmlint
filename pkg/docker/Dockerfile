@@ -14,5 +14,5 @@ RUN apk-install sqlite-libs json-glib-dev
 RUN git clone -b develop https://github.com/sahib/rmlint.git
 WORKDIR rmlint
 RUN scons config 
-RUN scons DEBUG=1 -j4  # For releases you can omit DEBUG=1
+RUN HAVE_MM_CRC32_U64=0 scons DEBUG=1 -j4  # For releases you can omit DEBUG=1
 CMD ["/bin/sh"]

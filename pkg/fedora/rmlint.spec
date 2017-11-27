@@ -16,13 +16,14 @@ especially an extremely fast tool to remove duplicates from your filesystem.
 %prep 
 %autosetup -c rmlint-%{version}
 
-%build scons config; scons --prefix=%{buildroot}/usr --actual-prefix=/usr --libdir=lib64
+%build scons config; HAVE_MM_CRC32_U64=0 scons --prefix=%{buildroot}/usr --actual-prefix=/usr --libdir=lib64
 
 %install
 
 # Build rmlint, install it into BUILDROOT/<name>-<version>/,
 # but take care rmlint thinks it's installed to /usr (--actual_prefix)
-scons install --prefix=%{buildroot}/usr --actual-prefix=/usr --libdir=lib64
+# also disable mm_crc32_u64 optimisations because not all users will have this
+HAVE_MM_CRC32_U64=0 scons install --prefix=%{buildroot}/usr --actual-prefix=/usr --libdir=lib64
 
 # Find all rmlint.mo files and put them in rmlint.lang
 %find_lang %{name}

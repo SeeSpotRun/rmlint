@@ -364,15 +364,19 @@ def check_cygwin(context):
     return rc
 
 def check_mm_crc32_u64(context):
+    HAVE_MM_CRC32_U64 = os.getenv('HAVE_MM_CRC32_U64')
+    if HAVE_MM_CRC32_U64 is None:
+        rc = 0 if tests.CheckDeclaration(
+                context,
+                symbol='_mm_crc32_u64',
+                includes='#include <nmmintrin.h>\n'
+                ) else 1
+    else:
+        print('Using env override HAVE_MM_CRC32_U64={}'.format(HAVE_MM_CRC32_U64))
+        rc = HAVE_MM_CRC32_U64
 
-    rc = 0 if tests.CheckDeclaration(
-            context,
-            symbol='_mm_crc32_u64',
-            includes='#include <nmmintrin.h>\n'
-            ) else 1
-
-    conf.env['HAVE_MM_CRC32_U64'] = rc
     context.did_show_result = True
+    conf.env['HAVE_MM_CRC32_U64'] = rc
     context.Result(rc)
     return rc
 

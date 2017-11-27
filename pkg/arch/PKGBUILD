@@ -25,10 +25,10 @@ pkgver() {
 
 build() {
     cd "${srcdir}/${pkgname}"
-    scons DEBUG=1 --prefix=${pkgdir}/usr --actual-prefix=/usr
+    HAVE_MM_CRC32_U64=0 scons DEBUG=1 --prefix=${pkgdir}/usr --actual-prefix=/usr
 }
  
 package() {
     cd "${srcdir}/${pkgname}"
-    scons DEBUG=1 --prefix=${pkgdir}/usr install --actual-prefix=/usr
+    HAVE_MM_CRC32_U64=0 scons DEBUG=1 --prefix=${pkgdir}/usr install --actual-prefix=/usr
 }
